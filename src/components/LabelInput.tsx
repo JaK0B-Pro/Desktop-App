@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../context";
 import type { Suggestion, TxKind } from "../types";
-import { KIND_LABEL } from "./labels";
+import { kindLabel } from "./labels";
 
 interface Props {
   value: string;
@@ -11,6 +11,7 @@ interface Props {
   onPick: (s: Suggestion) => void;
   kind: TxKind;
   partyId: number | null;
+  chantierId: number | null;
   autoFocus?: boolean;
 }
 
@@ -21,8 +22,8 @@ interface Props {
  *
  * Keys: ↑/↓ to move, Enter to pick, Tab or → to accept the grey inline completion, Esc to close.
  */
-export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }: Props) {
-  const { fmt, parties } = useApp();
+export function LabelInput({ value, onChange, onPick, kind, partyId, chantierId, autoFocus }: Props) {
+  const { fmt, parties, chantiers, t } = useApp();
   const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -34,7 +35,7 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }
     const id = ++reqId.current;
     const t = setTimeout(async () => {
       try {
-        const res = await api.suggestLabels({ query: value, kind, partyId, limit: 8 });
+        const res = await api.suggestLabels({ query: value, kind, partyId, chantierId, limit: 8 });
         if (id === reqId.current) {
           setItems(res);
           setActive(0);
@@ -44,7 +45,7 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }
       }
     }, 60);
     return () => clearTimeout(t);
-  }, [value, kind, partyId, open]);
+  }, [value, kind, partyId, chantierId, open]);
 
   const top = items[0];
   const ghost =
@@ -84,6 +85,7 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }
   }
 
   const partyName = (id: number | null) => (id == null ? null : parties.find((p) => p.id === id)?.name ?? null);
+  const chantierName = (id: number | null) => (id == null ? null : chantiers.find((c) => c.id === id)?.name ?? null);
   const visible = open && items.length > 0 && !(items.length === 1 && items[0].label === value);
 
   return (
@@ -94,12 +96,13 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }
           className="input"
           value={value}
           autoFocus={autoFocus}
-          placeholder="What is it for? Start typing — I remember your labels"
+          placeholder={t("form.labelPh")}
           onChange={(e) => {
             onChange(e.target.value);
             setOpen(true);
           }}
-          onFocus={() => setOpen(true)}
+          // An empty field shows your frequent labels; a filled one (editing) waits for typing.
+          onFocus={() => !value && setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           onKeyDown={onKeyDown}
           autoComplete="off"
@@ -116,7 +119,7 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }
       {visible && (
         <ul className="suggestions" role="listbox">
           <li className="suggestions-head">
-            {value ? "Suggestions" : "Your frequent labels"} <span>↑↓ Enter · Tab completes</span>
+            {value ? t("sug.title") : t("sug.frequent")} <span>{t("sug.keys")}</span>
           </li>
           {items.map((s, i) => (
             <li
@@ -133,13 +136,15 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, autoFocus }
               <div className="s-main">
                 <Highlight text={s.label} query={value} />
                 <span className="s-meta">
-                  {s.lastKind && <span className={`chip k-${s.lastKind}`}>{KIND_LABEL[s.lastKind]}</span>}
+                  {s.lastKind && <span className={`chip k-${s.lastKind}`}>{kindLabel(t, s.lastKind)}</span>}
+                  {s.lastFamily && <span className="chip">{s.lastFamily}</span>}
+                  {chantierName(s.lastChantierId) && <span className="chip ch">🏗 {chantierName(s.lastChantierId)}</span>}
                   {partyName(s.lastPartyId) && <span className="chip">{partyName(s.lastPartyId)}</span>}
                 </span>
               </div>
               <div className="s-side">
                 {s.lastAmount != null && <span className="s-amount">{fmt(s.lastAmount)}</span>}
-                <span className="s-uses">used {s.uses}×</span>
+                <span className="s-uses">{t("sug.used", { n: s.uses })}</span>
               </div>
             </li>
           ))}

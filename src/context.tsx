@@ -1,14 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, errorText } from "./api";
+import { makeT, type Lang, type T } from "./i18n";
 import { formatMoney, moneyFormat, type MoneyFormat } from "./money";
-import type { Account, Party, Settings, TxInput } from "./types";
+import type { Account, Chantier, FamilyCount, Party, Settings, TxInput } from "./types";
 
-export type Page = "dashboard" | "transactions" | "accounts" | "parties" | "reports" | "settings";
+export type JournalKind = "all" | "income" | "expense" | "transfer" | "credit";
+export type Page = "dashboard" | "journal" | "accounts" | "chantiers" | "parties" | "reports" | "settings";
 
 export interface Route {
   page: Page;
+  journal?: JournalKind;
   accountId?: number;
   partyId?: number;
+  chantierId?: number;
 }
 
 interface Toast {
@@ -19,10 +23,19 @@ interface Toast {
 
 interface AppCtx {
   settings: Settings;
+  lang: Lang;
+  t: T;
   money: MoneyFormat;
   fmt: (cents: number, opts?: { sign?: boolean }) => string;
   accounts: Account[];
   parties: Party[];
+  chantiers: Chantier[];
+  families: FamilyCount[];
+  years: number[];
+  /** Selected fiscal year ("exercice") and its date range. */
+  exercise: number;
+  range: { from: string; to: string };
+  setExercise: (year: number) => void;
   /** Incremented after every data change so pages can reload. */
   version: number;
   refresh: () => Promise<void>;
@@ -51,14 +64,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
+  const [chantiers, setChantiers] = useState<Chantier[]>([]);
+  const [families, setFamilies] = useState<FamilyCount[]>([]);
+  const [years, setYears] = useState<number[]>([new Date().getFullYear()]);
   const [version, setVersion] = useState(0);
   const [route, setRoute] = useState<Route>({ page: "dashboard" });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [txDraft, setTxDraft] = useState<Partial<TxInput> | null>(null);
   const [ask, setAsk] = useState<{ text: string; action: string; resolve: (ok: boolean) => void } | null>(null);
 
+  const lang: Lang = settings.language === "en" ? "en" : "fr";
+  const t = useMemo(() => makeT(lang), [lang]);
+
   const confirm = useCallback(
-    (text: string, action = "Delete") => new Promise<boolean>((resolve) => setAsk({ text, action, resolve })),
+    (text: string, action?: string) => new Promise<boolean>((resolve) => setAsk({ text, action: action ?? "", resolve })),
     [],
   );
   const answer = (ok: boolean) => {
@@ -68,17 +87,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((text: string, kind: "ok" | "error" = "ok") => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "error" ? 6000 : 3000);
+    setToasts((ts) => [...ts, { id, text, kind }]);
+    setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), kind === "error" ? 6000 : 3000);
   }, []);
   const fail = useCallback((e: unknown) => toast(errorText(e), "error"), [toast]);
 
   const refresh = useCallback(async () => {
     try {
-      const [s, a, p] = await Promise.all([api.getSettings(), api.listAccounts(true), api.listParties(true)]);
+      const [s, a, p, c, f, y] = await Promise.all([
+        api.getSettings(),
+        api.listAccounts(true),
+        api.listParties(true),
+        api.listChantiers(true),
+        api.listFamilies(),
+        api.listYears(),
+      ]);
       setSettings(s);
       setAccounts(a);
       setParties(p);
+      setChantiers(c);
+      setFamilies(f);
+      setYears(y);
       setVersion((v) => v + 1);
     } catch (e) {
       fail(e);
@@ -89,22 +118,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const updateSetting = useCallback(
-    async (key: string, value: string) => {
-      await api.setSetting(key, value);
-      setSettings((s) => ({ ...s, [key]: value }));
-    },
-    [],
-  );
+  // Keep the document language in sync (dates, spell-check, screen readers).
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
+  const updateSetting = useCallback(async (key: string, value: string) => {
+    setSettings((s) => ({ ...s, [key]: value }));
+    await api.setSetting(key, value);
+  }, []);
+
+  const exercise = Number.parseInt(settings.exercise ?? "", 10) || new Date().getFullYear();
+  const range = useMemo(() => ({ from: `${exercise}-01-01`, to: `${exercise}-12-31` }), [exercise]);
   const money = useMemo(() => moneyFormat(settings), [settings]);
+  const openTx = useCallback((initial?: Partial<TxInput>) => setTxDraft(initial ?? {}), []);
 
   const value: AppCtx = {
     settings,
+    lang,
+    t,
     money,
     fmt: (c, o) => formatMoney(c, money, o),
     accounts,
     parties,
+    chantiers,
+    families,
+    years: years.includes(exercise) ? years : [exercise, ...years].sort((a, b) => b - a),
+    exercise,
+    range,
+    setExercise: (y) => void updateSetting("exercise", String(y)).catch(fail),
     version,
     refresh,
     updateSetting,
@@ -113,7 +155,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toast,
     fail,
     confirm,
-    openTx: (initial) => setTxDraft(initial ?? {}),
+    openTx,
     txDraft,
     closeTx: () => setTxDraft(null),
   };
@@ -128,10 +170,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
               <p>{ask.text}</p>
               <div className="form-actions end">
                 <button className="btn ghost" onClick={() => answer(false)}>
-                  Cancel
+                  {t("c.cancel")}
                 </button>
                 <button className="btn danger" autoFocus onClick={() => answer(true)}>
-                  {ask.action}
+                  {ask.action || t("c.delete")}
                 </button>
               </div>
             </div>
@@ -139,9 +181,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
-            {t.text}
+        {toasts.map((x) => (
+          <div key={x.id} className={`toast ${x.kind}`}>
+            {x.text}
           </div>
         ))}
       </div>

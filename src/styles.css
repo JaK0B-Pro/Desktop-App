@@ -21,6 +21,11 @@
   --k-purchase: #9333ea;
   --k-sale: #0e7490;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --grid-head: #dbe7fb;
+  --grid-head-ink: #1e3a6b;
+  --grid-alt: #f8fafd;
+  --grid-sel: #2563eb;
+  --grid-sel-ink: #ffffff;
   --radius: 10px;
   color-scheme: light;
   font-family: Inter, "Segoe UI", system-ui, -apple-system, "Noto Sans", "Noto Sans Arabic", sans-serif;
@@ -52,6 +57,11 @@
     --k-purchase: #c084fc;
     --k-sale: #22d3ee;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --grid-head: #1f2b3d;
+    --grid-head-ink: #b9cdf0;
+    --grid-alt: #1d2229;
+    --grid-sel: #2f5fc4;
+    --grid-sel-ink: #ffffff;
     color-scheme: dark;
   }
 }
@@ -129,9 +139,63 @@ kbd {
 .app {
   display: grid;
   grid-template-columns: 220px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "side top" "side main";
   height: 100vh;
 }
+.topbar {
+  grid-area: top;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.company {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.company strong {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.company span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.exercise {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.year {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.year.on {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 650;
+}
+nav hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 6px 4px;
+  width: calc(100% - 8px);
+}
 .sidebar {
+  grid-area: side;
+  overflow: auto;
   background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 16px 12px;
@@ -188,6 +252,7 @@ nav {
   text-align: center;
 }
 .content {
+  grid-area: main;
   overflow: auto;
 }
 .page {
@@ -1040,4 +1105,434 @@ textarea.input {
   .quick-actions {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ---- journal window (treasury-style grid) ---- */
+.page.journal {
+  max-width: none;
+  height: 100%;
+  padding: 16px 20px;
+}
+.window {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0 14px 10px;
+  min-height: 0;
+  flex: 1;
+}
+.window-title {
+  margin: 0 -14px;
+  padding: 8px 14px;
+  font-weight: 700;
+  background: linear-gradient(var(--primary-soft), transparent);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.toolbar-sep {
+  flex: 1;
+}
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.inline-field .input {
+  width: auto;
+}
+.hint {
+  margin: 0;
+}
+.grid-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  outline: none;
+}
+.grid-wrap:focus-visible {
+  border-color: var(--primary);
+}
+.page.journal .grid-wrap {
+  min-height: 300px;
+}
+.card .grid-wrap {
+  border: none;
+  border-radius: 0;
+}
+.grid-scroll {
+  overflow: auto;
+  flex: 1;
+  max-height: calc(100vh - 290px);
+}
+.card .grid-scroll {
+  max-height: 560px;
+}
+.table.grid th {
+  background: var(--grid-head);
+  color: var(--grid-head-ink);
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+  z-index: 1;
+}
+.table.grid td {
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+.table.grid tbody tr:nth-child(even) {
+  background: var(--grid-alt);
+}
+.table.grid tbody tr:hover {
+  background: var(--surface-2);
+}
+.table.grid tbody tr.selected,
+.table.grid tbody tr.selected:hover {
+  background: var(--grid-sel);
+  color: var(--grid-sel-ink);
+}
+.table.grid tbody tr.selected .muted,
+.table.grid tbody tr.selected .neg,
+.table.grid tbody tr.selected .pos {
+  color: inherit;
+}
+.table.grid tfoot td {
+  font-weight: 700;
+  padding: 8px 10px;
+  border-top: 2px solid var(--border);
+  background: var(--surface-2);
+}
+.table .sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.icon-col {
+  width: 26px;
+  padding-right: 0 !important;
+  text-align: center;
+}
+.clip {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clip.label-col {
+  max-width: 320px;
+}
+.grid-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.grid-foot strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.card-head.padded {
+  padding: 14px 16px 0;
+}
+.chip.ch {
+  color: var(--k-purchase);
+}
+
+/* ---- edit window ---- */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.line {
+  grid-template-columns: 1.2fr 1.2fr 150px 70px;
+}
+.line.no-chantier {
+  grid-template-columns: 1fr 150px 70px;
+}
+.line-head {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.line-head .num {
+  text-align: right;
+}
+.line-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.muted-select {
+  color: var(--muted);
+}
+fieldset.cheque {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 12px 12px 0;
+  margin: 0 0 12px;
+}
+.cheque-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr auto auto;
+  gap: 12px;
+  align-items: start;
+}
+.cheque-crossed,
+.cheque-grid > .btn {
+  margin-top: 22px;
+}
+.nowrap-row {
+  flex-wrap: nowrap;
+}
+.link.small {
+  font-size: 11px;
+}
+
+/* ---- printing ---- */
+#print-root {
+  display: none;
+}
+@media print {
+  body.printing > *:not(#print-root) {
+    display: none !important;
+  }
+  body.printing #print-root {
+    display: block;
+    color: #000;
+    background: #fff;
+  }
+  html,
+  body.printing {
+    background: #fff;
+  }
+}
+.p-doc {
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+  color: #000;
+}
+.p-company {
+  border-bottom: 2px solid #000;
+  padding-bottom: 6px;
+  margin-bottom: 14px;
+}
+.p-company strong {
+  font-size: 15px;
+  text-transform: uppercase;
+}
+.p-title {
+  display: block;
+  text-align: center;
+  font-size: 18px;
+  letter-spacing: 0.05em;
+  margin: 10px 0 16px;
+}
+.p-period {
+  text-align: center;
+  margin: -8px 0 12px;
+}
+.p-fields {
+  width: 100%;
+  border-collapse: collapse;
+}
+.p-fields th {
+  text-align: left;
+  width: 30%;
+  padding: 6px;
+  border: 1px solid #999;
+  background: #f0f0f0;
+}
+.p-fields td {
+  padding: 6px;
+  border: 1px solid #999;
+}
+.p-amount {
+  font-size: 16px;
+  margin: 16px 0 6px;
+  text-align: right;
+}
+.p-words {
+  border: 1px solid #999;
+  padding: 8px;
+}
+.p-signs {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 40px;
+  padding: 0 30px 60px;
+  font-weight: 600;
+}
+.p-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+.p-list th,
+.p-list td {
+  border: 1px solid #999;
+  padding: 3px 5px;
+  text-align: left;
+}
+.p-list th {
+  background: #e8e8e8;
+}
+.p-list .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.p-list tfoot td {
+  font-weight: 700;
+  background: #f0f0f0;
+}
+.chq {
+  position: relative;
+  width: 175mm;
+  height: 80mm;
+  font-family: Arial, sans-serif;
+  font-size: 11pt;
+  color: #000;
+}
+.chq.vertical {
+  /* Cheque fed vertically: rotate the whole layout a quarter turn. */
+  transform: translateX(80mm) rotate(90deg);
+  transform-origin: top left;
+}
+.chq-f {
+  position: absolute;
+  white-space: nowrap;
+}
+.chq-f.big {
+  font-size: 13pt;
+  font-weight: 700;
+}
+.chq-cross {
+  position: absolute;
+  width: 10mm;
+  height: 14mm;
+  border-left: 1.2px solid #000;
+  border-right: 1.2px solid #000;
+  transform: skewX(-30deg);
+}
+
+/* compact, uniform controls */
+.input {
+  height: 34px;
+  padding: 6px 10px;
+}
+textarea.input {
+  height: auto;
+}
+select.input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a93a3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+.field {
+  gap: 4px;
+  margin-bottom: 9px;
+}
+.form-grid.three {
+  grid-template-columns: 150px 1fr 140px;
+}
+.tx-form > p {
+  margin: 6px 0 10px;
+}
+.lines {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.line {
+  margin-bottom: 6px;
+}
+fieldset.cheque {
+  padding: 10px 12px 0;
+  margin-bottom: 9px;
+}
+.completion {
+  padding: 7px 11px;
+}
+.filters .input {
+  font-size: 13px;
+  max-width: 190px;
+}
+.filters .input.grow {
+  max-width: none;
+}
+.table.grid {
+  font-size: 13px;
+}
+.clip {
+  max-width: 170px;
+}
+.clip.label-col {
+  max-width: 280px;
+}
+.table.grid td.num {
+  white-space: nowrap;
+}
+
+/* Fixed layout: every column fits the window and long text ends with "…". */
+.table.grid.fixed {
+  table-layout: fixed;
+  min-width: 860px;
+}
+.table.grid.fixed .clip {
+  max-width: none;
+}
+.table.grid.fixed .icon-col {
+  width: 28px;
+}
+.table.grid.fixed .col-num {
+  width: 56px;
+}
+.table.grid.fixed .col-date {
+  width: 96px;
+}
+.table.grid.fixed .col-type {
+  width: 118px;
+}
+.table.grid.fixed .col-account {
+  width: 15%;
+}
+.table.grid.fixed .col-chantier {
+  width: 14%;
+}
+.table.grid.fixed .col-party {
+  width: 14%;
+}
+.table.grid.fixed .col-family {
+  width: 10%;
+}
+.table.grid.fixed .col-amount {
+  width: 150px;
+}
+.table.grid.fixed .col-balance {
+  width: 230px;
 }

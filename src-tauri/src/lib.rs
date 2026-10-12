@@ -93,6 +93,45 @@ fn party_statement(state: State<AppState>, id: i64) -> Res<(Party, Vec<Transacti
     with_db(&state, |c| ledger::party_statement(c, id))
 }
 
+// --- chantiers ---------------------------------------------------------------
+
+#[tauri::command]
+fn list_chantiers(state: State<AppState>, include_archived: Option<bool>) -> Res<Vec<Chantier>> {
+    with_db(&state, |c| ledger::list_chantiers(c, include_archived.unwrap_or(false)))
+}
+
+#[tauri::command]
+fn save_chantier(state: State<AppState>, input: ChantierInput) -> Res<Chantier> {
+    with_db(&state, |c| ledger::save_chantier(c, &input))
+}
+
+#[tauri::command]
+fn delete_chantier(state: State<AppState>, id: i64) -> Res<bool> {
+    with_db(&state, |c| ledger::delete_chantier(c, id))
+}
+
+#[tauri::command]
+fn chantier_statement(state: State<AppState>, id: i64) -> Res<(Chantier, Vec<Transaction>)> {
+    with_db(&state, |c| ledger::chantier_statement(c, id))
+}
+
+// --- families, years, cheques ----------------------------------------------
+
+#[tauri::command]
+fn list_families(state: State<AppState>) -> Res<Vec<FamilyCount>> {
+    with_db(&state, |c| ledger::list_families(c))
+}
+
+#[tauri::command]
+fn list_years(state: State<AppState>) -> Res<Vec<i32>> {
+    with_db(&state, |c| ledger::list_years(c))
+}
+
+#[tauri::command]
+fn next_cheque_no(state: State<AppState>, account_id: i64) -> Res<Option<String>> {
+    with_db(&state, |c| ledger::next_cheque_no(c, account_id))
+}
+
 // --- transactions -----------------------------------------------------------
 
 #[tauri::command]
@@ -181,6 +220,13 @@ pub fn run() {
             save_party,
             delete_party,
             party_statement,
+            list_chantiers,
+            save_chantier,
+            delete_chantier,
+            chantier_statement,
+            list_families,
+            list_years,
+            next_cheque_no,
             list_transactions,
             save_transaction,
             delete_transaction,

@@ -3,6 +3,33 @@
 export type AccountKind = "cash" | "bank" | "project" | "other";
 export type PartyKind = "supplier" | "client" | "person" | "employee" | "other";
 export type TxKind = "income" | "expense" | "transfer" | "purchase" | "sale";
+export type TxStatus = "ok" | "pending";
+
+export interface Chantier {
+  id: number;
+  name: string;
+  client: string | null;
+  notes: string | null;
+  archived: boolean;
+  income: number;
+  expense: number;
+  purchases: number;
+  lastActivity: string | null;
+  createdAt: string;
+}
+
+export interface ChantierInput {
+  id?: number | null;
+  name: string;
+  client?: string | null;
+  notes?: string | null;
+  archived?: boolean;
+}
+
+export interface FamilyCount {
+  name: string;
+  count: number;
+}
 
 export interface Account {
   id: number;
@@ -53,6 +80,8 @@ export interface PartyInput {
 export interface LineInput {
   accountId: number;
   amount: number;
+  /** null = same chantier as the transaction */
+  chantierId?: number | null;
 }
 
 export interface TxInput {
@@ -61,6 +90,12 @@ export interface TxInput {
   kind: TxKind;
   label: string;
   partyId?: number | null;
+  chantierId?: number | null;
+  family?: string | null;
+  status?: TxStatus | null;
+  chequeNo?: string | null;
+  chequeCrossed?: boolean;
+  chequePayee?: string | null;
   fromAccountId?: number | null;
   amount?: number | null;
   lines: LineInput[];
@@ -70,6 +105,8 @@ export interface TxInput {
 export interface LineView {
   accountId: number;
   accountName: string;
+  chantierId: number | null;
+  chantierName: string | null;
   amount: number;
 }
 
@@ -80,6 +117,13 @@ export interface Transaction {
   label: string;
   partyId: number | null;
   partyName: string | null;
+  chantierId: number | null;
+  chantierName: string | null;
+  family: string | null;
+  status: TxStatus;
+  chequeNo: string | null;
+  chequeCrossed: boolean;
+  chequePayee: string | null;
   amount: number;
   notes: string | null;
   lines: LineView[];
@@ -94,6 +138,9 @@ export interface TxFilter {
   kind?: string | null;
   accountId?: number | null;
   partyId?: number | null;
+  chantierId?: number | null;
+  family?: string | null;
+  status?: string | null;
   search?: string | null;
   limit?: number | null;
 }
@@ -102,6 +149,7 @@ export interface SuggestQuery {
   query: string;
   kind?: TxKind | null;
   partyId?: number | null;
+  chantierId?: number | null;
   limit?: number | null;
 }
 
@@ -115,6 +163,8 @@ export interface Suggestion {
   lastAmount: number | null;
   avgAmount: number | null;
   lastFromAccountId: number | null;
+  lastChantierId: number | null;
+  lastFamily: string | null;
   lastLines: LineInput[];
   score: number;
 }
@@ -151,6 +201,8 @@ export interface Report {
   purchases: number;
   sales: number;
   byLabel: LabelTotal[];
+  byFamily: LabelTotal[];
+  byChantier: Chantier[];
   monthly: MonthPoint[];
 }
 

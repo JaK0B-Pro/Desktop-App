@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Account,
   AccountInput,
+  Chantier,
+  ChantierInput,
+  FamilyCount,
   Dashboard,
   Party,
   PartyInput,
@@ -28,6 +31,15 @@ export const api = {
   saveParty: (input: PartyInput) => invoke<Party>("save_party", { input }),
   deleteParty: (id: number) => invoke<boolean>("delete_party", { id }),
   partyStatement: (id: number) => invoke<[Party, Transaction[]]>("party_statement", { id }),
+
+  listChantiers: (includeArchived = false) => invoke<Chantier[]>("list_chantiers", { includeArchived }),
+  saveChantier: (input: ChantierInput) => invoke<Chantier>("save_chantier", { input }),
+  deleteChantier: (id: number) => invoke<boolean>("delete_chantier", { id }),
+  chantierStatement: (id: number) => invoke<[Chantier, Transaction[]]>("chantier_statement", { id }),
+
+  listFamilies: () => invoke<FamilyCount[]>("list_families"),
+  listYears: () => invoke<number[]>("list_years"),
+  nextChequeNo: (accountId: number) => invoke<string | null>("next_cheque_no", { accountId }),
 
   listTransactions: (filter: TxFilter) => invoke<Transaction[]>("list_transactions", { filter }),
   saveTransaction: (input: TxInput) => invoke<Transaction>("save_transaction", { input }),

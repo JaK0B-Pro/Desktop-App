@@ -1,74 +1,86 @@
-# AccountBook
+# AccountBook — gestion de trésorerie
 
-A smart desktop accounting app built with **Tauri 2** (Rust backend + SQLite) and a **React + TypeScript** frontend.
+A smart desktop treasury app for construction companies, built with **Tauri 2** (Rust + SQLite) and **React + TypeScript**.
+It follows the workflow of classic treasury software (Dépenses / Versements windows, N° · Date · Compte · Chantier · Bénéficiaire · Libellé · Montant grid, fiscal years), and adds smart features on top.
+The interface is in **French** by default, and English is available in Paramètres.
 
-![Dashboard](docs/screenshots/dashboard.png)
+![Dépenses](docs/screenshots/depenses.png)
 
 ## Features
 
-- **Accounts.** Cash boxes, bank accounts and projects, each with a live balance and a statement with running balance.
-- **Deposits to several accounts at once.** One deposit can be split over Cash, Project A, Project B and so on. Use *Split equally*, *Same amount each*, or type each amount yourself. A *Total to split* field shows what is left to assign.
-- **Beneficiaries (suppliers, clients, people).** Every beneficiary shows **how much they owe you or how much you owe them**, with a full statement:
-  - *Give money* or *Receive money* move cash and update the balance.
-  - *They gave me goods (purchase on credit)* means you owe them.
-  - *I gave them goods (sale on credit)* means they owe you.
-  - A one-click **Settle** button.
-- **Smart labels that learn from you.** As you type a label, the app suggests labels you used before. It ranks them by:
-  - text match: prefix, word start, *typos* ("furnitre" finds "Furniture"), and fuzzy matching
-  - how **often** and how **recently** you used each label
-  - **context**: the type you are entering and the beneficiary you selected
+- **Journal windows** for Dépenses, Versements, Virements, Crédits and the full Journal:
+  - a numbered grid with sortable columns and a total at the bottom
+  - **Du / Au** dates and a search box ("Cherchez…") that also finds a N°, a cheque number or a chantier
+  - filters by compte, chantier, bénéficiaire, famille and état
+  - **Ajouter / Modifier / Supprimer / Imprimer**
+  - keyboard: ↑↓, Enter to edit, Suppr to delete, Ctrl+N to add
+- **Édition window** with Date, Famille, État, Libellé, Chantier, Bénéficiaire, Compte(s) and Montant, plus a **cheque section** (Chèque N°, Ordre de, Chèque barré, **Imprimer chèque**) and **Imprimer** for a voucher (*bon de dépense*) with the amount in words.
+- **Deposits to several accounts.** One versement can be split over Caisse, Banque and so on. **Each line keeps the same chantier or gets its own.** Split tools: *Répartir également*, *Même montant partout*, *Total à répartir*.
+- **Chantiers.** Money received and spent per site, credit purchases, the result, and a full statement.
+- **Bénéficiaires.** Suppliers, clients and people, with **how much they owe you or you owe them**, a statement with running balance, and one-click *Régler*.
+- **Smart labels that learn.** Suggestions while you type, ranked by:
+  - text match, including typos and fuzzy matching
+  - how often and how recently you used a label
+  - the context: type, bénéficiaire and **chantier**
 
-  Picking a suggestion **auto-fills** the type, the beneficiary, the amount and even the multi-account split from the last time you used it. `Tab` accepts the grey inline completion. Settings → *Smart labels* shows what the app learned and lets you forget items.
-- **Transfers** between your own accounts (one source to one or more destinations).
-- **Calculator in amount fields.** Type `1200+350` or `3*45.5`.
-- **Reports.** Money in and out per month, and totals per label for any period.
-- **Export to CSV** (opens in Excel, UTF-8 safe for Arabic/French) and **one-click database backup** to `Documents/AccountBook`.
-- Light and dark mode. Keyboard first: `Ctrl+N` creates a new transaction and `Ctrl+Enter` saves it.
+  Picking a suggestion fills in the type, famille, chantier, bénéficiaire, amount and the multi-account split. `Tab` accepts the grey completion.
+- **Smart cheques.** The next cheque number of the account is suggested. The amount is written in words in French ("Huit mille deux cent quatre-vingt-huit dinars…"). Printing is calibrated with mm offsets and supports cheques fed vertically.
+- **Fiscal years (exercices)** in the top bar, **reports** (by month, label, famille and chantier), a **calculator** in amount fields (`1200+350`), **Excel export** (`;`-separated, French decimals) and a **database backup**.
 
-| Smart suggestions | Learned multi-account deposit |
+| Versement split across comptes and chantiers | Smart suggestions |
 |---|---|
-| ![](docs/screenshots/suggestions.png) | ![](docs/screenshots/deposit-split.png) |
+| ![](docs/screenshots/versement-multi-comptes.png) | ![](docs/screenshots/suggestions.png) |
 
-| Beneficiary statement | Reports |
+| Édition dépense | Chantiers |
 |---|---|
-| ![](docs/screenshots/beneficiary.png) | ![](docs/screenshots/reports.png) |
+| ![](docs/screenshots/edition-depense.png) | ![](docs/screenshots/chantiers.png) |
+
+| Bénéficiaire statement | Tableau de bord |
+|---|---|
+| ![](docs/screenshots/beneficiaire.png) | ![](docs/screenshots/dashboard.png) |
 
 ## Run it
 
-Prerequisites: [Rust](https://rustup.rs), Node.js 20+, and the [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/) for your OS (WebView2 on Windows, which is already installed on Windows 10/11; webkit2gtk on Linux).
+Prerequisites: [Rust](https://rustup.rs), Node.js 20+, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). On Windows 10/11 you only need the Microsoft C++ Build Tools, because WebView2 is already installed.
 
 ```bash
 npm install
-npm run tauri dev      # development window with hot reload
-npm run tauri build    # installer in src-tauri/target/release/bundle/
+npm run tauri dev      # development window
+npm run tauri build    # Windows installer in src-tauri/target/release/bundle/
 ```
 
 Run the backend tests with `cd src-tauri && cargo test`.
 
-Your data is stored in a single SQLite file in the OS app-data folder, for example `%APPDATA%\com.accountbook.desktop\accountbook.db` on Windows.
+Data is stored in one SQLite file, `%APPDATA%\com.accountbook.desktop\accountbook.db` on Windows. Database upgrades are automatic.
 
 ## How balances work
 
-Amounts are stored as integer cents, so there are no rounding errors.
+Amounts are stored as integer centimes.
 
-| Type | Accounts | Beneficiary balance (+ = they owe you) |
-|---|---|---|
-| Deposit (income) | + into each chosen account | − (they paid you) |
-| Expense | − from each chosen account | + (you paid them) |
-| Transfer | − source, + destinations | — |
-| Purchase on credit | no money moves | − (you owe them) |
-| Sale on credit | no money moves | + (they owe you) |
+| Type | Comptes | Bénéficiaire (+ = il vous doit) | Chantier result |
+|---|---|---|---|
+| Versement | + each account line | − | + received |
+| Dépense | − each account line | + | − spent |
+| Virement | − source, + destinations | — | — |
+| Achat à crédit | no money moves | − (you owe them) | shown for information |
+| Vente à crédit | no money moves | + (they owe you) | shown for information |
+
+The chantier result is cash-based (received − spent). A credit purchase is paid later by a dépense, so subtracting both would count it twice.
 
 ## Project structure
 
 ```
 src-tauri/src/
   lib.rs       Tauri commands (the API used by the UI)
-  ledger.rs    SQLite schema, accounts, beneficiaries, transactions, reports, learning (+ tests)
-  suggest.rs   Smart-label ranking engine: fuzzy/typo match, frecency, context (+ tests)
+  ledger.rs    SQLite schema + migrations, comptes, chantiers, bénéficiaires, opérations, reports, learning (+ tests)
+  suggest.rs   Smart-label ranking: fuzzy/typo match, frecency, context (+ tests)
   models.rs    Shared data types
 src/
-  components/LabelInput.tsx       The smart label field
-  components/TransactionForm.tsx  Deposit/expense/transfer/credit form with multi-account split
-  pages/                          Dashboard, Transactions, Accounts, Beneficiaries, Reports, Settings
+  i18n.ts                          French / English texts
+  words.ts                         Amounts in words (FR/EN)
+  print.ts                         Voucher, cheque and list printing
+  components/LabelInput.tsx        Smart label field
+  components/TransactionForm.tsx   Édition window (multi-account, chantier per line, cheque)
+  components/TransactionTable.tsx  Journal grid
+  pages/                           Tableau de bord, Journal, Comptes, Chantiers, Bénéficiaires, Rapports, Paramètres
 ```

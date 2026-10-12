@@ -2,15 +2,18 @@ import { useState } from "react";
 import { useApp } from "../context";
 import type { MonthPoint } from "../types";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const monthName = (m: string) => {
-  const [y, mm] = m.split("-");
-  return `${MONTHS[Number(mm) - 1]} ${y.slice(2)}`;
+const MONTHS = {
+  en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+  fr: ["janv", "févr", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc"],
 };
 
 /** Grouped bars: money in vs money out per month, with a hover tooltip. */
 export function MonthChart({ data }: { data: MonthPoint[] }) {
-  const { fmt } = useApp();
+  const { fmt, t, lang } = useApp();
+  const monthName = (m: string) => {
+    const [y, mm] = m.split("-");
+    return `${MONTHS[lang][Number(mm) - 1]} ${y.slice(2)}`;
+  };
   const [hover, setHover] = useState<number | null>(null);
   const H = 180;
   const W = 640;
@@ -36,10 +39,10 @@ export function MonthChart({ data }: { data: MonthPoint[] }) {
     <div className="chart">
       <div className="legend">
         <span>
-          <i style={{ background: "var(--series-in)" }} /> Money in
+          <i style={{ background: "var(--series-in)" }} /> {t("chart.in")}
         </span>
         <span>
-          <i style={{ background: "var(--series-out)" }} /> Money out
+          <i style={{ background: "var(--series-out)" }} /> {t("chart.out")}
         </span>
       </div>
       <div className="chart-box">
@@ -68,12 +71,12 @@ export function MonthChart({ data }: { data: MonthPoint[] }) {
           <div className="tooltip" style={{ left: `${((hover + 0.5) / data.length) * 100}%` }}>
             <strong>{monthName(hp.month)}</strong>
             <div>
-              <i style={{ background: "var(--series-in)" }} /> In <b>{fmt(hp.income)}</b>
+              <i style={{ background: "var(--series-in)" }} /> {t("chart.in")} <b>{fmt(hp.income)}</b>
             </div>
             <div>
-              <i style={{ background: "var(--series-out)" }} /> Out <b>{fmt(hp.expense)}</b>
+              <i style={{ background: "var(--series-out)" }} /> {t("chart.out")} <b>{fmt(hp.expense)}</b>
             </div>
-            <div className="muted">Net {fmt(hp.income - hp.expense, { sign: true })}</div>
+            <div className="muted">{t("chart.net")} {fmt(hp.income - hp.expense, { sign: true })}</div>
           </div>
         )}
       </div>

@@ -2,21 +2,21 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../context";
 import { AmountInput } from "../components/AmountInput";
-import { PARTY_KIND_LABEL } from "../components/labels";
+import { PARTY_KINDS, partyKindLabel } from "../components/labels";
 import { Empty, Field, Modal } from "../components/Modal";
-import { TransactionTable } from "../components/TransactionTable";
+import { TxGrid } from "../components/TransactionTable";
 import type { Party, PartyInput, PartyKind, Transaction } from "../types";
 
 type Show = "all" | "owe-you" | "you-owe" | "settled";
 
-/** "owes you $50" / "you owe $50" / "settled" */
+/** "vous doit 50 DA" / "vous lui devez 50 DA" / "réglé" */
 export function useBalanceText() {
-  const { fmt } = useApp();
-  return (b: number) => (b > 0 ? `owes you ${fmt(b)}` : b < 0 ? `you owe ${fmt(-b)}` : "settled");
+  const { fmt, t } = useApp();
+  return (b: number) => (b > 0 ? t("pt.balOwesYou", { v: fmt(b) }) : b < 0 ? t("pt.balYouOwe", { v: fmt(-b) }) : t("pt.balSettled"));
 }
 
 export function Parties() {
-  const { parties, route, navigate, fmt } = useApp();
+  const { parties, route, navigate, fmt, t } = useApp();
   const balanceText = useBalanceText();
   const [editing, setEditing] = useState<PartyInput | null>(null);
   const [search, setSearch] = useState("");
@@ -46,38 +46,38 @@ export function Parties() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Beneficiaries</h1>
-          <p className="muted">Suppliers, clients and people you give money to or receive from</p>
+          <h1>{t("nav.parties")}</h1>
+          <p className="muted">{t("pt.subtitle")}</p>
         </div>
         <button className="btn primary" onClick={() => setEditing({ name: "", kind: "supplier", openingBalance: 0 })}>
-          + New beneficiary
+          {t("pt.new")}
         </button>
       </header>
 
       <section className="stats three">
         <div className="stat">
-          <span>They owe you</span>
+          <span>{t("pt.oweYou")}</span>
           <strong className="pos">{fmt(receivable)}</strong>
         </div>
         <div className="stat">
-          <span>You owe them</span>
+          <span>{t("pt.youOwe")}</span>
           <strong className="neg">{fmt(payable)}</strong>
         </div>
         <div className="stat">
-          <span>Net position</span>
+          <span>{t("pt.net")}</span>
           <strong className={receivable - payable < 0 ? "neg" : "pos"}>{fmt(receivable - payable, { sign: true })}</strong>
         </div>
       </section>
 
       <div className="filters">
-        <input className="input grow" placeholder="Search name or phone…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input className="input grow" placeholder={t("pt.searchPh")} value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="segmented">
           {(
             [
-              ["all", "All"],
-              ["owe-you", "Owe you"],
-              ["you-owe", "You owe"],
-              ["settled", "Settled"],
+              ["all", t("c.all")],
+              ["owe-you", t("pt.oweYou")],
+              ["you-owe", t("pt.youOwe")],
+              ["settled", t("pt.settled")],
             ] as [Show, string][]
           ).map(([k, l]) => (
             <button key={k} className={show === k ? "on" : ""} onClick={() => setShow(k)}>
@@ -86,44 +86,42 @@ export function Parties() {
           ))}
         </div>
         <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">All types</option>
-          {Object.entries(PARTY_KIND_LABEL).map(([k, l]) => (
+          <option value="">{t("c.all")}</option>
+          {PARTY_KINDS.map((k) => (
             <option key={k} value={k}>
-              {l}
+              {partyKindLabel(t, k)}
             </option>
           ))}
         </select>
         <label className="check">
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> {t("c.showArchived")}
         </label>
       </div>
 
       <section className="card flush">
         {list.length === 0 ? (
-          <Empty>{parties.length ? "No match." : "No beneficiaries yet. Add your first supplier or client."}</Empty>
+          <Empty>{parties.length ? t("c.noMatch") : t("pt.empty")}</Empty>
         ) : (
-          <table className="table clickable">
+          <table className="table grid clickable">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Phone</th>
-                <th>Last activity</th>
-                <th className="num">Balance</th>
+                <th>{t("c.name")}</th>
+                <th>{t("c.type")}</th>
+                <th>{t("c.phone")}</th>
+                <th>{t("c.lastActivity")}</th>
+                <th className="num">{t("c.balance")}</th>
               </tr>
             </thead>
             <tbody>
               {list.map((p) => (
                 <tr key={p.id} onClick={() => navigate({ page: "parties", partyId: p.id })}>
                   <td className="strong">
-                    {p.name} {p.archived && <span className="chip">archived</span>}
+                    {p.name} {p.archived && <span className="chip">{t("c.archived")}</span>}
                   </td>
-                  <td>{PARTY_KIND_LABEL[p.kind]}</td>
-                  <td>{p.phone ?? <span className="muted">—</span>}</td>
-                  <td>{p.lastActivity ?? <span className="muted">—</span>}</td>
-                  <td className={`num strong ${p.balance > 0 ? "pos" : p.balance < 0 ? "neg" : "muted"}`}>
-                    {balanceText(p.balance)}
-                  </td>
+                  <td>{partyKindLabel(t, p.kind)}</td>
+                  <td>{p.phone}</td>
+                  <td>{p.lastActivity?.split("-").reverse().join("/")}</td>
+                  <td className={`num strong ${p.balance > 0 ? "pos" : p.balance < 0 ? "neg" : "muted"}`}>{balanceText(p.balance)}</td>
                 </tr>
               ))}
             </tbody>
@@ -144,7 +142,7 @@ function PartyDetail({
   editing: PartyInput | null;
   setEditing: (v: PartyInput | null) => void;
 }) {
-  const { version, fail, fmt, navigate, openTx, accounts } = useApp();
+  const { version, fail, fmt, navigate, openTx, accounts, t } = useApp();
   const balanceText = useBalanceText();
   const cashbox = accounts.find((a) => !a.archived);
   const [rows, setRows] = useState<Transaction[]>([]);
@@ -162,26 +160,26 @@ function PartyDetail({
   return (
     <div className="page">
       <button className="link" onClick={() => navigate({ page: "parties" })}>
-        ← All beneficiaries
+        {t("pt.all")}
       </button>
       <header className="page-head">
         <div>
           <h1>{party.name}</h1>
           <p className="muted">
-            {PARTY_KIND_LABEL[party.kind]}
+            {partyKindLabel(t, party.kind)}
             {party.phone && ` · ${party.phone}`}
             {party.notes && ` · ${party.notes}`}
           </p>
         </div>
         <button className="btn ghost" onClick={() => setEditing(party)}>
-          Edit
+          {t("c.edit")}
         </button>
       </header>
 
       <section className={`balance-banner ${party.balance > 0 ? "pos" : party.balance < 0 ? "neg" : ""}`}>
         <div>
-          <span>Balance</span>
-          <strong>{party.balance === 0 ? "Settled" : party.balance > 0 ? "They owe you" : "You owe them"}</strong>
+          <span>{t("c.balance")}</span>
+          <strong>{party.balance === 0 ? t("pt.settled") : party.balance > 0 ? t("pt.theyOwe") : t("pt.iOwe")}</strong>
         </div>
         <strong className="big">{fmt(settle)}</strong>
         {party.balance !== 0 && (
@@ -191,53 +189,53 @@ function PartyDetail({
               openTx({
                 kind: party.balance > 0 ? "income" : "expense",
                 partyId: party.id,
-                label: party.balance > 0 ? `Payment from ${party.name}` : `Payment to ${party.name}`,
+                label: party.balance > 0 ? t("pt.paymentFrom", { name: party.name }) : t("pt.paymentTo", { name: party.name }),
                 lines: cashbox ? [{ accountId: cashbox.id, amount: settle }] : [],
               })
             }
           >
-            Settle {fmt(settle)}
+            {t("pt.settle", { v: fmt(settle) })}
           </button>
         )}
       </section>
 
       <div className="quick-actions">
         <button className="qa" onClick={() => openTx({ kind: "expense", partyId: party.id })}>
-          <b>💸 Give money</b>
-          <span>You pay them (cash out)</span>
+          <b>{t("pt.give")}</b>
+          <span>{t("pt.giveHint")}</span>
         </button>
         <button className="qa" onClick={() => openTx({ kind: "income", partyId: party.id })}>
-          <b>💰 Receive money</b>
-          <span>They pay you (cash in)</span>
+          <b>{t("pt.receive")}</b>
+          <span>{t("pt.receiveHint")}</span>
         </button>
         <button className="qa" onClick={() => openTx({ kind: "purchase", partyId: party.id })}>
-          <b>📦 They gave me goods</b>
-          <span>On credit — you owe them</span>
+          <b>{t("pt.gaveMe")}</b>
+          <span>{t("pt.gaveMeHint")}</span>
         </button>
         <button className="qa" onClick={() => openTx({ kind: "sale", partyId: party.id })}>
-          <b>🧾 I gave them goods</b>
-          <span>On credit — they owe you</span>
+          <b>{t("pt.gaveThem")}</b>
+          <span>{t("pt.gaveThemHint")}</span>
         </button>
       </div>
 
       <div className="summary-row">
-        <span>Opening {balanceText(party.openingBalance)}</span>
+        <span>{t("pt.opening", { v: balanceText(party.openingBalance) })}</span>
         <span>
-          Paid them <strong>{fmt(sumKind("expense"))}</strong>
+          {t("pt.paid")} <strong>{fmt(sumKind("expense"))}</strong>
         </span>
         <span>
-          Received <strong>{fmt(sumKind("income"))}</strong>
+          {t("pt.received")} <strong>{fmt(sumKind("income"))}</strong>
         </span>
         <span>
-          Bought on credit <strong>{fmt(sumKind("purchase"))}</strong>
+          {t("pt.bought")} <strong>{fmt(sumKind("purchase"))}</strong>
         </span>
         <span>
-          Sold on credit <strong>{fmt(sumKind("sale"))}</strong>
+          {t("pt.sold")} <strong>{fmt(sumKind("sale"))}</strong>
         </span>
       </div>
 
       <section className="card flush">
-        <TransactionTable rows={rows} statement="party" balanceLabel={balanceText} />
+        <TxGrid rows={rows} statement showType balanceLabel={balanceText} hide={["party"]} />
       </section>
       {editing && <PartyEditor value={editing} onClose={() => setEditing(null)} />}
     </div>
@@ -245,7 +243,7 @@ function PartyDetail({
 }
 
 function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => void }) {
-  const { refresh, toast, fail, confirm, navigate } = useApp();
+  const { refresh, toast, fail, confirm, navigate, t } = useApp();
   const [v, setV] = useState<PartyInput>(value);
   const [direction, setDirection] = useState<"owe-you" | "you-owe">(value.openingBalance < 0 ? "you-owe" : "owe-you");
   const set = (patch: Partial<PartyInput>) => setV((x) => ({ ...x, ...patch }));
@@ -253,8 +251,8 @@ function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => voi
   async function save() {
     const opening = Math.abs(v.openingBalance) * (direction === "you-owe" ? -1 : 1);
     try {
-      const p = await api.saveParty({ ...v, openingBalance: opening });
-      toast(v.id ? "Saved" : `${p.name} added`);
+      await api.saveParty({ ...v, openingBalance: opening });
+      toast(t("c.saved"));
       await refresh();
       onClose();
     } catch (e) {
@@ -263,10 +261,10 @@ function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => voi
   }
 
   async function remove() {
-    if (!v.id || !(await confirm(`Delete “${v.name}”? If there are transactions it will be archived instead.`))) return;
+    if (!v.id || !(await confirm(t("c.confirmDeleteOrArchive", { name: v.name })))) return;
     try {
       const deleted = await api.deleteParty(v.id);
-      toast(deleted ? "Deleted" : "Has transactions — archived instead");
+      toast(deleted ? t("c.deleted") : t("c.archivedInstead"));
       await refresh();
       onClose();
       navigate({ page: "parties" });
@@ -276,7 +274,7 @@ function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => voi
   }
 
   return (
-    <Modal title={v.id ? "Edit beneficiary" : "New beneficiary"} onClose={onClose}>
+    <Modal title={v.id ? t("pt.edit") : t("pt.create")} onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -284,53 +282,53 @@ function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => voi
         }}
       >
         <div className="grid-2">
-          <Field label="Name">
+          <Field label={t("c.name")}>
             <input className="input" autoFocus value={v.name} onChange={(e) => set({ name: e.target.value })} />
           </Field>
-          <Field label="Type">
+          <Field label={t("c.type")}>
             <select className="input" value={v.kind} onChange={(e) => set({ kind: e.target.value as PartyKind })}>
-              {Object.entries(PARTY_KIND_LABEL).map(([k, l]) => (
+              {PARTY_KINDS.map((k) => (
                 <option key={k} value={k}>
-                  {l}
+                  {partyKindLabel(t, k)}
                 </option>
               ))}
             </select>
           </Field>
         </div>
-        <Field label="Phone">
+        <Field label={t("c.phone")}>
           <input className="input" value={v.phone ?? ""} onChange={(e) => set({ phone: e.target.value })} />
         </Field>
-        <Field label="Opening balance (before using the app)">
-          <div className="row">
+        <Field label={t("pt.openingLabel")}>
+          <div className="row nowrap-row">
             <select className="input narrow" value={direction} onChange={(e) => setDirection(e.target.value as "owe-you" | "you-owe")}>
-              <option value="owe-you">They owe me</option>
-              <option value="you-owe">I owe them</option>
+              <option value="owe-you">{t("pt.theyOweMe")}</option>
+              <option value="you-owe">{t("pt.iOweThem")}</option>
             </select>
             <AmountInput value={Math.abs(v.openingBalance)} onChange={(c) => set({ openingBalance: c ?? 0 })} />
           </div>
         </Field>
-        <Field label="Notes">
+        <Field label={t("c.notes")}>
           <textarea className="input" rows={2} value={v.notes ?? ""} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
         {v.id && (
           <label className="check">
-            <input type="checkbox" checked={!!v.archived} onChange={(e) => set({ archived: e.target.checked })} /> Archived
+            <input type="checkbox" checked={!!v.archived} onChange={(e) => set({ archived: e.target.checked })} /> {t("c.archived")}
           </label>
         )}
         <footer className="form-actions">
           {v.id ? (
             <button type="button" className="btn danger ghost" onClick={remove}>
-              Delete
+              {t("c.delete")}
             </button>
           ) : (
             <span />
           )}
           <div className="row">
             <button type="button" className="btn ghost" onClick={onClose}>
-              Cancel
+              {t("c.cancel")}
             </button>
             <button type="submit" className="btn primary">
-              Save
+              {t("c.save")}
             </button>
           </div>
         </footer>

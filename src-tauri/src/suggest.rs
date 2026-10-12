@@ -104,6 +104,8 @@ pub struct Candidate {
     pub kind_uses: i64,
     /// Number of uses with the party currently selected.
     pub party_uses: i64,
+    /// Number of uses with the chantier currently selected.
+    pub chantier_uses: i64,
 }
 
 /// Frequency of use, decayed by recency (half weight after ~2 weeks of not using it).
@@ -122,7 +124,8 @@ pub fn score(query: &str, c: &Candidate, now: DateTime<Utc>) -> Option<f64> {
     let uses = c.uses.max(1) as f64;
     let ctx_kind = (c.kind_uses as f64 / uses).min(1.0);
     let ctx_party = (c.party_uses as f64 / uses).min(1.0);
-    Some(m * 4.0 + frecency(c.uses, c.last_used, now) + ctx_kind * 1.0 + ctx_party * 1.5)
+    let ctx_chantier = (c.chantier_uses as f64 / uses).min(1.0);
+    Some(m * 4.0 + frecency(c.uses, c.last_used, now) + ctx_kind * 1.0 + ctx_party * 1.5 + ctx_chantier * 1.2)
 }
 
 #[cfg(test)]
@@ -137,6 +140,7 @@ mod tests {
             last_used: Utc::now() - Duration::days(days_ago),
             kind_uses: 0,
             party_uses: 0,
+            chantier_uses: 0,
         }
     }
 

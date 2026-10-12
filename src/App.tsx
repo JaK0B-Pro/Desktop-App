@@ -1,41 +1,73 @@
 import { useEffect } from "react";
-import { useApp, type Page } from "./context";
+import { useApp, type JournalKind, type Page } from "./context";
+import type { TKey } from "./i18n";
 import { TransactionForm } from "./components/TransactionForm";
 import { Accounts } from "./pages/Accounts";
+import { Chantiers } from "./pages/Chantiers";
 import { Dashboard } from "./pages/Dashboard";
+import { Journal } from "./pages/Journal";
 import { Parties } from "./pages/Parties";
 import { Reports } from "./pages/Reports";
 import { Settings } from "./pages/Settings";
-import { Transactions } from "./pages/Transactions";
 
-const NAV: [Page, string, string][] = [
-  ["dashboard", "▦", "Dashboard"],
-  ["transactions", "≡", "Transactions"],
-  ["accounts", "◫", "Accounts"],
-  ["parties", "☺", "Beneficiaries"],
-  ["reports", "▤", "Reports"],
-  ["settings", "⚙", "Settings"],
+type NavItem = { page: Page; journal?: JournalKind; icon: string; label: TKey };
+
+const NAV: (NavItem | "sep")[] = [
+  { page: "dashboard", icon: "▦", label: "nav.dashboard" },
+  "sep",
+  { page: "journal", journal: "expense", icon: "↑", label: "nav.expense" },
+  { page: "journal", journal: "income", icon: "↓", label: "nav.income" },
+  { page: "journal", journal: "transfer", icon: "⇄", label: "nav.transfer" },
+  { page: "journal", journal: "credit", icon: "⧗", label: "nav.credit" },
+  { page: "journal", journal: "all", icon: "≡", label: "nav.all" },
+  "sep",
+  { page: "accounts", icon: "◫", label: "nav.accounts" },
+  { page: "chantiers", icon: "⌂", label: "nav.chantiers" },
+  { page: "parties", icon: "☺", label: "nav.parties" },
+  { page: "reports", icon: "▤", label: "nav.reports" },
+  { page: "settings", icon: "⚙", label: "nav.settings" },
 ];
 
-export function App() {
-  const { route, navigate, openTx, txDraft, closeTx, fmt, accounts } = useApp();
+const frDate = (d: string) => d.split("-").reverse().join("/");
 
-  // Ctrl/Cmd+N: new transaction from anywhere.
+export function App() {
+  const { route, navigate, openTx, txDraft, closeTx, fmt, accounts, t, settings, years, exercise, setExercise, range } = useApp();
+
+  // Ctrl/Cmd+N: new entry from anywhere (same type as the open journal).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        openTx();
+        const j = route.page === "journal" ? route.journal : undefined;
+        openTx({ kind: j === "income" || j === "transfer" ? j : j === "credit" ? "purchase" : "expense" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openTx]);
+  }, [openTx, route]);
 
   const total = accounts.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
+  const isOn = (n: NavItem) => route.page === n.page && (n.page !== "journal" || route.journal === n.journal);
 
   return (
     <div className="app">
+      <header className="topbar">
+        <div className="company">
+          <strong>{settings.company_name || "AccountBook"}</strong>
+          {settings.company_activity && <span>{settings.company_activity}</span>}
+        </div>
+        <div className="exercise">
+          <span className="muted">{t("app.exercise")}</span>
+          {years.slice(0, 4).map((y) => (
+            <button key={y} className={`year ${y === exercise ? "on" : ""}`} onClick={() => setExercise(y)}>
+              📒 {y}
+            </button>
+          ))}
+          <span className="muted small">
+            {t("app.from")} <b>{frDate(range.from)}</b> {t("app.to")} <b>{frDate(range.to)}</b>
+          </span>
+        </div>
+      </header>
       <aside className="sidebar">
         <div className="brand">
           <div className="logo">AB</div>
@@ -45,25 +77,30 @@ export function App() {
           </div>
         </div>
         <button className="btn primary block" onClick={() => openTx()}>
-          + New <kbd>Ctrl N</kbd>
+          + {t("nav.new")} <kbd>Ctrl N</kbd>
         </button>
         <nav>
-          {NAV.map(([page, icon, label]) => (
-            <button
-              key={page}
-              className={`nav-item ${route.page === page ? "on" : ""}`}
-              onClick={() => navigate({ page })}
-            >
-              <span className="nav-icon">{icon}</span>
-              {label}
-            </button>
-          ))}
+          {NAV.map((n, i) =>
+            n === "sep" ? (
+              <hr key={i} />
+            ) : (
+              <button
+                key={n.label}
+                className={`nav-item ${isOn(n) ? "on" : ""}`}
+                onClick={() => navigate({ page: n.page, journal: n.journal })}
+              >
+                <span className="nav-icon">{n.icon}</span>
+                {t(n.label)}
+              </button>
+            ),
+          )}
         </nav>
       </aside>
       <main className="content">
         {route.page === "dashboard" && <Dashboard />}
-        {route.page === "transactions" && <Transactions />}
+        {route.page === "journal" && <Journal key={route.journal} kind={route.journal ?? "all"} />}
         {route.page === "accounts" && <Accounts />}
+        {route.page === "chantiers" && <Chantiers />}
         {route.page === "parties" && <Parties />}
         {route.page === "reports" && <Reports />}
         {route.page === "settings" && <Settings />}

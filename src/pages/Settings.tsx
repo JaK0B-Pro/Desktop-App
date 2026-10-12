@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../context";
-import { KIND_LABEL } from "../components/labels";
+import { kindLabel } from "../components/labels";
 import { Empty, Field } from "../components/Modal";
+import { printCheque } from "../print";
+import { today } from "../money";
 import type { Suggestion } from "../types";
 
 export function Settings() {
-  const { settings, updateSetting, fmt, toast, fail, confirm, version, refresh } = useApp();
+  const { settings, updateSetting, fmt, toast, fail, confirm, version, refresh, t, lang, money } = useApp();
   const [labels, setLabels] = useState<Suggestion[]>([]);
   const [q, setQ] = useState("");
 
@@ -14,8 +16,19 @@ export function Settings() {
     api.listLearnedLabels().then(setLabels).catch(fail);
   }, [version, fail]);
 
+  const text = (key: string, label: string, hint?: string, type = "text") => (
+    <Field label={label} hint={hint}>
+      <input
+        className="input"
+        type={type}
+        value={settings[key] ?? ""}
+        onChange={(e) => updateSetting(key, e.target.value).catch(fail)}
+      />
+    </Field>
+  );
+
   async function forget(s: Suggestion) {
-    if (!(await confirm(`Forget “${s.label}”? It will not be suggested anymore (your transactions are kept).`, "Forget"))) return;
+    if (!(await confirm(t("set.forgetConfirm", { label: s.label }), t("c.forget")))) return;
     try {
       await api.forgetLabel(s.key);
       setLabels((l) => l.filter((x) => x.key !== s.key));
@@ -37,38 +50,44 @@ export function Settings() {
   return (
     <div className="page">
       <header className="page-head">
-        <div>
-          <h1>Settings</h1>
-        </div>
+        <h1>{t("nav.settings")}</h1>
       </header>
 
       <section className="card">
-        <h3>Currency</h3>
+        <h3>{t("set.company")}</h3>
         <div className="grid-3">
-          <Field label="Symbol" hint="e.g. $, €, DA, DH, ر.س">
-            <input
-              className="input"
-              value={settings.currency_symbol ?? ""}
-              onChange={(e) => updateSetting("currency_symbol", e.target.value).catch(fail)}
-            />
-          </Field>
-          <Field label="Position">
-            <select
-              className="input"
-              value={settings.currency_position ?? "before"}
-              onChange={(e) => updateSetting("currency_position", e.target.value).catch(fail)}
-            >
-              <option value="before">Before the amount</option>
-              <option value="after">After the amount</option>
+          {text("company_name", t("set.companyName"))}
+          {text("company_activity", t("set.companyActivity"))}
+          <Field label={t("set.language")}>
+            <select className="input" value={lang} onChange={(e) => updateSetting("language", e.target.value).catch(fail)}>
+              <option value="fr">Français</option>
+              <option value="en">English</option>
             </select>
           </Field>
-          <Field label="Decimals" hint="Set this before entering data">
+        </div>
+      </section>
+
+      <section className="card">
+        <h3>{t("set.currency")}</h3>
+        <div className="grid-3">
+          {text("currency_symbol", t("set.symbol"), t("set.symbolHint"))}
+          <Field label={t("set.position")}>
+            <select
+              className="input"
+              value={settings.currency_position ?? "after"}
+              onChange={(e) => updateSetting("currency_position", e.target.value).catch(fail)}
+            >
+              <option value="before">{t("set.before")}</option>
+              <option value="after">{t("set.after")}</option>
+            </select>
+          </Field>
+          <Field label={t("set.decimals")} hint={t("set.decimalsHint")}>
             <select
               className="input"
               value={settings.decimals ?? "2"}
               onChange={async (e) => {
-                if (await confirm("Changing decimals re-interprets all stored amounts. Only do this before entering data. Continue?", "Change"))
-                  updateSetting("decimals", e.target.value).catch(fail);
+                const v = e.target.value;
+                if (await confirm(t("set.decimalsConfirm"), t("c.change"))) updateSetting("decimals", v).catch(fail);
               }}
             >
               <option value="0">0 (1234)</option>
@@ -76,18 +95,48 @@ export function Settings() {
               <option value="3">3 (1234.567)</option>
             </select>
           </Field>
+          {text("currency_name", t("set.currencyName"))}
+          {text("currency_subunit", t("set.currencySub"))}
         </div>
-        <p className="muted small">Preview: {fmt(123456789)}</p>
+        <p className="muted small">{t("set.preview", { v: fmt(123456789) })}</p>
+      </section>
+
+      <section className="card">
+        <h3>{t("set.cheque")}</h3>
+        <p className="muted small">{t("set.chequeHint")}</p>
+        <div className="grid-3">
+          {text("cheque_city", t("set.chequeCity"))}
+          {text("cheque_offset_x", t("set.chequeOffsetX"), undefined, "number")}
+          {text("cheque_offset_y", t("set.chequeOffsetY"), undefined, "number")}
+        </div>
+        <div className="row">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.cheque_vertical === "1"}
+              onChange={(e) => updateSetting("cheque_vertical", e.target.checked ? "1" : "0").catch(fail)}
+            />{" "}
+            {t("set.chequeVertical")}
+          </label>
+          <button
+            className="btn"
+            onClick={() =>
+              printCheque(
+                { t, lang, settings, decimals: money.decimals, fmt },
+                { amount: 828850, payee: "SARL EXEMPLE", date: today(), crossed: true },
+              )
+            }
+          >
+            🖨 {t("set.chequeTest")}
+          </button>
+        </div>
       </section>
 
       <section className="card">
         <div className="card-head">
           <div>
-            <h3>Smart labels — what the app has learned</h3>
-            <p className="muted small">
-              Every label you save is remembered with how often you use it, the beneficiary, the amount and the account
-              split. Suggestions get better the more you use the app.
-            </p>
+            <h3>{t("set.smart")}</h3>
+            <p className="muted small">{t("set.smartHint")}</p>
           </div>
           <button
             className="btn small"
@@ -98,25 +147,26 @@ export function Settings() {
                   await refresh();
                   return n;
                 },
-                (n) => `Re-learned from ${n} transactions`,
+                (n) => t("set.relearned", { n }),
               )
             }
           >
-            Re-learn from history
+            {t("set.relearn")}
           </button>
         </div>
-        <input className="input" placeholder="Filter learned labels…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="input" placeholder={t("set.filterLearned")} value={q} onChange={(e) => setQ(e.target.value)} />
         {shown.length === 0 ? (
-          <Empty>Nothing learned yet — save a few transactions.</Empty>
+          <Empty>{t("set.nothingLearned")}</Empty>
         ) : (
-          <table className="table">
+          <table className="table grid">
             <thead>
               <tr>
-                <th>Label</th>
-                <th>Usually</th>
-                <th className="num">Uses</th>
-                <th className="num">Avg amount</th>
-                <th>Last used</th>
+                <th>{t("col.label")}</th>
+                <th>{t("set.usually")}</th>
+                <th>{t("col.family")}</th>
+                <th className="num">{t("set.uses")}</th>
+                <th className="num">{t("set.avg")}</th>
+                <th>{t("set.lastUsed")}</th>
                 <th />
               </tr>
             </thead>
@@ -124,13 +174,14 @@ export function Settings() {
               {shown.map((s) => (
                 <tr key={s.key}>
                   <td className="strong">{s.label}</td>
-                  <td>{s.lastKind && <span className={`chip k-${s.lastKind}`}>{KIND_LABEL[s.lastKind]}</span>}</td>
+                  <td>{s.lastKind && <span className={`chip k-${s.lastKind}`}>{kindLabel(t, s.lastKind)}</span>}</td>
+                  <td>{s.lastFamily}</td>
                   <td className="num">{s.uses}</td>
                   <td className="num">{s.avgAmount != null ? fmt(s.avgAmount) : "—"}</td>
-                  <td>{s.lastUsed.slice(0, 10)}</td>
+                  <td>{s.lastUsed.slice(0, 10).split("-").reverse().join("/")}</td>
                   <td className="actions">
                     <button className="btn small ghost" onClick={() => forget(s)}>
-                      Forget
+                      {t("c.forget")}
                     </button>
                   </td>
                 </tr>
@@ -141,14 +192,14 @@ export function Settings() {
       </section>
 
       <section className="card">
-        <h3>Data</h3>
-        <p className="muted small">Files are saved in your Documents/AccountBook folder.</p>
+        <h3>{t("set.data")}</h3>
+        <p className="muted small">{t("set.dataHint")}</p>
         <div className="row">
-          <button className="btn" onClick={() => run(api.exportCsv, (p) => `Exported to ${p}`)}>
-            Export transactions (CSV / Excel)
+          <button className="btn" onClick={() => run(api.exportCsv, (p) => t("set.exported", { p }))}>
+            {t("set.export")}
           </button>
-          <button className="btn" onClick={() => run(api.backupDatabase, (p) => `Backup saved to ${p}`)}>
-            Back up database
+          <button className="btn" onClick={() => run(api.backupDatabase, (p) => t("set.backedUp", { p }))}>
+            {t("set.backup")}
           </button>
         </div>
       </section>

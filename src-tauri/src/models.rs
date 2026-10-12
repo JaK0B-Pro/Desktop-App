@@ -68,12 +68,54 @@ pub struct PartyInput {
     pub archived: bool,
 }
 
+/// A construction site / job ("chantier"). Money lines can be attributed to a chantier
+/// independently of the account the money comes from or goes to.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Chantier {
+    pub id: i64,
+    pub name: String,
+    pub client: Option<String>,
+    pub notes: Option<String>,
+    pub archived: bool,
+    /// Money received for this chantier.
+    pub income: i64,
+    /// Money spent on this chantier.
+    pub expense: i64,
+    /// Goods bought on credit for this chantier.
+    pub purchases: i64,
+    pub last_activity: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChantierInput {
+    pub id: Option<i64>,
+    pub name: String,
+    pub client: Option<String>,
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+/// A family (category) with its usage count, for suggestions.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FamilyCount {
+    pub name: String,
+    pub count: i64,
+}
+
 /// One account share of a transaction (always positive in input).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LineInput {
     pub account_id: i64,
     pub amount: i64,
+    /// Chantier of this line; `None` means "same as the transaction".
+    #[serde(default)]
+    pub chantier_id: Option<i64>,
 }
 
 /// Transaction kinds:
@@ -90,6 +132,15 @@ pub struct TxInput {
     pub kind: String,
     pub label: String,
     pub party_id: Option<i64>,
+    /// Default chantier for all lines.
+    pub chantier_id: Option<i64>,
+    pub family: Option<String>,
+    /// `ok` | `pending`
+    pub status: Option<String>,
+    pub cheque_no: Option<String>,
+    #[serde(default)]
+    pub cheque_crossed: bool,
+    pub cheque_payee: Option<String>,
     pub from_account_id: Option<i64>,
     /// Only used by `purchase` and `sale`.
     pub amount: Option<i64>,
@@ -103,6 +154,8 @@ pub struct TxInput {
 pub struct LineView {
     pub account_id: i64,
     pub account_name: String,
+    pub chantier_id: Option<i64>,
+    pub chantier_name: Option<String>,
     /// Signed: positive = money into the account.
     pub amount: i64,
 }
@@ -116,6 +169,13 @@ pub struct Transaction {
     pub label: String,
     pub party_id: Option<i64>,
     pub party_name: Option<String>,
+    pub chantier_id: Option<i64>,
+    pub chantier_name: Option<String>,
+    pub family: Option<String>,
+    pub status: String,
+    pub cheque_no: Option<String>,
+    pub cheque_crossed: bool,
+    pub cheque_payee: Option<String>,
     /// Total, always positive.
     pub amount: i64,
     pub notes: Option<String>,
@@ -135,6 +195,9 @@ pub struct TxFilter {
     pub kind: Option<String>,
     pub account_id: Option<i64>,
     pub party_id: Option<i64>,
+    pub chantier_id: Option<i64>,
+    pub family: Option<String>,
+    pub status: Option<String>,
     pub search: Option<String>,
     pub limit: Option<i64>,
 }
@@ -146,6 +209,7 @@ pub struct SuggestQuery {
     pub query: String,
     pub kind: Option<String>,
     pub party_id: Option<i64>,
+    pub chantier_id: Option<i64>,
     pub limit: Option<usize>,
 }
 
@@ -163,6 +227,8 @@ pub struct Suggestion {
     pub last_amount: Option<i64>,
     pub avg_amount: Option<i64>,
     pub last_from_account_id: Option<i64>,
+    pub last_chantier_id: Option<i64>,
+    pub last_family: Option<String>,
     pub last_lines: Vec<LineInput>,
     pub score: f64,
 }
@@ -207,5 +273,8 @@ pub struct Report {
     pub purchases: i64,
     pub sales: i64,
     pub by_label: Vec<LabelTotal>,
+    /// Totals per family (label field holds the family name).
+    pub by_family: Vec<LabelTotal>,
+    pub by_chantier: Vec<Chantier>,
     pub monthly: Vec<MonthPoint>,
 }

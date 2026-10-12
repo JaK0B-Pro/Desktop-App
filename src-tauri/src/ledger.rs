@@ -18,6 +18,7 @@ fn e<E: std::fmt::Display>(err: E) -> String {
 pub const ACCOUNT_KINDS: &[&str] = &["cash", "bank", "project", "other"];
 pub const PARTY_KINDS: &[&str] = &["supplier", "client", "person", "employee", "other"];
 pub const TX_KINDS: &[&str] = &["income", "expense", "transfer", "purchase", "sale"];
+pub const TX_STATUSES: &[&str] = &["ok", "pending"];
 
 /// Signed effect of a transaction on its party balance (positive = the party owes you more).
 pub fn party_effect(kind: &str, total: i64) -> i64 {
@@ -103,6 +104,34 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 "#;
 
+/// Schema changes after the first version, applied once in order (tracked by `PRAGMA user_version`).
+const MIGRATIONS: &[&str] = &[
+    // v1: chantiers, family, status and cheque details.
+    r#"
+    CREATE TABLE IF NOT EXISTS chantiers (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        client TEXT,
+        notes TEXT,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    ALTER TABLE transactions ADD COLUMN chantier_id INTEGER REFERENCES chantiers(id);
+    ALTER TABLE transactions ADD COLUMN family TEXT;
+    ALTER TABLE transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok';
+    ALTER TABLE transactions ADD COLUMN cheque_no TEXT;
+    ALTER TABLE transactions ADD COLUMN cheque_crossed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE transactions ADD COLUMN cheque_payee TEXT;
+    ALTER TABLE transaction_lines ADD COLUMN chantier_id INTEGER REFERENCES chantiers(id);
+    CREATE INDEX IF NOT EXISTS idx_lines_chantier ON transaction_lines(chantier_id);
+    ALTER TABLE label_memory ADD COLUMN last_chantier_id INTEGER;
+    ALTER TABLE label_memory ADD COLUMN last_family TEXT;
+    "#,
+];
+
+/// `label_context.kind` value used to count uses of a label per chantier (`party_id` holds the chantier id).
+const CHANTIER_CTX: &str = "#chantier";
+
 pub fn now_str() -> String {
     Utc::now().to_rfc3339()
 }
@@ -118,6 +147,13 @@ pub fn init(conn: &Connection) -> Res<()> {
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
         .map_err(e)?;
     conn.execute_batch(SCHEMA).map_err(e)?;
+    let version: usize = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(e)?;
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
+        if let Err(err) = conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1)) {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(format!("Database migration {} failed: {err}", i + 1));
+        }
+    }
     // First run: a default cash box and default settings.
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))
@@ -125,16 +161,22 @@ pub fn init(conn: &Connection) -> Res<()> {
     let seeded = get_setting(conn, "seeded")?.is_some();
     if count == 0 && !seeded {
         conn.execute(
-            "INSERT INTO accounts (name, kind, opening_balance, color, created_at) VALUES ('Cash', 'cash', 0, '#16a34a', ?1)",
+            "INSERT INTO accounts (name, kind, opening_balance, color, created_at) VALUES ('Caisse', 'cash', 0, '#16a34a', ?1)",
             params![now_str()],
         )
         .map_err(e)?;
     }
     for (k, v) in [
         ("seeded", "1"),
-        ("currency_symbol", "$"),
-        ("currency_position", "before"),
+        ("currency_symbol", "DA"),
+        ("currency_position", "after"),
+        ("currency_name", "dinars"),
+        ("currency_subunit", "centimes"),
         ("decimals", "2"),
+        ("language", "fr"),
+        ("company_name", ""),
+        ("company_activity", ""),
+        ("cheque_city", ""),
     ] {
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)",
@@ -349,6 +391,195 @@ pub fn delete_party(conn: &Connection, id: i64) -> Res<bool> {
 }
 
 // ---------------------------------------------------------------------------
+// Chantiers
+// ---------------------------------------------------------------------------
+
+fn row_to_chantier(r: &Row) -> rusqlite::Result<Chantier> {
+    Ok(Chantier {
+        id: r.get("id")?,
+        name: r.get("name")?,
+        client: r.get("client")?,
+        notes: r.get("notes")?,
+        archived: r.get::<_, i64>("archived")? != 0,
+        income: r.get("income")?,
+        expense: r.get("expense")?,
+        purchases: r.get("purchases")?,
+        last_activity: r.get("last_activity")?,
+        created_at: r.get("created_at")?,
+    })
+}
+
+/// Chantier totals, optionally limited to a date range (`?1` = from, `?2` = to, empty = unbounded).
+const CHANTIER_SELECT: &str = "SELECT c.*, \
+    COALESCE((SELECT SUM(l.amount) FROM transaction_lines l JOIN transactions t ON t.id = l.transaction_id \
+              WHERE l.chantier_id = c.id AND t.kind = 'income' AND (?1 = '' OR t.date >= ?1) AND (?2 = '' OR t.date <= ?2)), 0) AS income, \
+    COALESCE((SELECT -SUM(l.amount) FROM transaction_lines l JOIN transactions t ON t.id = l.transaction_id \
+              WHERE l.chantier_id = c.id AND t.kind = 'expense' AND (?1 = '' OR t.date >= ?1) AND (?2 = '' OR t.date <= ?2)), 0) AS expense, \
+    COALESCE((SELECT SUM(t.amount) FROM transactions t \
+              WHERE t.chantier_id = c.id AND t.kind = 'purchase' AND (?1 = '' OR t.date >= ?1) AND (?2 = '' OR t.date <= ?2)), 0) AS purchases, \
+    (SELECT MAX(t.date) FROM transactions t WHERE t.chantier_id = c.id \
+        OR t.id IN (SELECT transaction_id FROM transaction_lines WHERE chantier_id = c.id)) AS last_activity \
+    FROM chantiers c";
+
+pub fn list_chantiers(conn: &Connection, include_archived: bool) -> Res<Vec<Chantier>> {
+    list_chantiers_between(conn, include_archived, "", "")
+}
+
+fn list_chantiers_between(conn: &Connection, include_archived: bool, from: &str, to: &str) -> Res<Vec<Chantier>> {
+    let sql = format!(
+        "{CHANTIER_SELECT} {} ORDER BY c.archived, c.name COLLATE NOCASE",
+        if include_archived { "" } else { "WHERE c.archived = 0" }
+    );
+    let mut stmt = conn.prepare(&sql).map_err(e)?;
+    let rows = stmt.query_map(params![from, to], row_to_chantier).map_err(e)?;
+    rows.collect::<Result<_, _>>().map_err(e)
+}
+
+pub fn get_chantier(conn: &Connection, id: i64) -> Res<Chantier> {
+    conn.query_row(&format!("{CHANTIER_SELECT} WHERE c.id = ?3"), params!["", "", id], row_to_chantier)
+        .optional()
+        .map_err(e)?
+        .ok_or_else(|| format!("Chantier #{id} not found"))
+}
+
+pub fn save_chantier(conn: &Connection, input: &ChantierInput) -> Res<Chantier> {
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("Chantier name is required".into());
+    }
+    let id = match input.id {
+        Some(id) => {
+            let n = conn
+                .execute(
+                    "UPDATE chantiers SET name=?1, client=?2, notes=?3, archived=?4 WHERE id=?5",
+                    params![name, input.client, input.notes, input.archived as i64, id],
+                )
+                .map_err(e)?;
+            if n == 0 {
+                return Err(format!("Chantier #{id} not found"));
+            }
+            id
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO chantiers (name, client, notes, archived, created_at) VALUES (?1,?2,?3,?4,?5)",
+                params![name, input.client, input.notes, input.archived as i64, now_str()],
+            )
+            .map_err(e)?;
+            conn.last_insert_rowid()
+        }
+    };
+    get_chantier(conn, id)
+}
+
+/// Deletes a chantier if nothing references it; otherwise it is archived.
+pub fn delete_chantier(conn: &Connection, id: i64) -> Res<bool> {
+    let used: i64 = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM transactions WHERE chantier_id = ?1) + \
+                    (SELECT COUNT(*) FROM transaction_lines WHERE chantier_id = ?1)",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(e)?;
+    if used > 0 {
+        conn.execute("UPDATE chantiers SET archived = 1 WHERE id = ?1", [id]).map_err(e)?;
+        Ok(false)
+    } else {
+        conn.execute("DELETE FROM chantiers WHERE id = ?1", [id]).map_err(e)?;
+        Ok(true)
+    }
+}
+
+/// Statement of a chantier: every transaction touching it, with the signed amount
+/// attributed to the chantier and a running cash balance "received - spent" (newest first).
+/// Credit purchases/sales are listed with their amount but do not move the balance: they are
+/// settled later by expenses/incomes, which would otherwise be counted twice.
+pub fn chantier_statement(conn: &Connection, chantier_id: i64) -> Res<(Chantier, Vec<Transaction>)> {
+    let chantier = get_chantier(conn, chantier_id)?;
+    let mut txs = query_transactions(conn, &TxFilter { chantier_id: Some(chantier_id), ..Default::default() }, true)?;
+    let mut bal = 0;
+    for t in txs.iter_mut() {
+        let eff: i64 = match t.kind.as_str() {
+            "income" | "expense" => t.lines.iter().filter(|l| l.chantier_id == Some(chantier_id)).map(|l| l.amount).sum(),
+            "purchase" => -t.amount,
+            "sale" => t.amount,
+            _ => 0,
+        };
+        if t.kind == "income" || t.kind == "expense" {
+            bal += eff;
+        }
+        t.effect = Some(eff);
+        t.running_balance = Some(bal);
+    }
+    txs.reverse();
+    Ok((chantier, txs))
+}
+
+// ---------------------------------------------------------------------------
+// Families, fiscal years, cheques
+// ---------------------------------------------------------------------------
+
+/// Families used so far, most used first.
+pub fn list_families(conn: &Connection) -> Res<Vec<FamilyCount>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT family, COUNT(*) AS n FROM transactions WHERE family IS NOT NULL AND family != '' \
+             GROUP BY lower(family) ORDER BY n DESC, family COLLATE NOCASE",
+        )
+        .map_err(e)?;
+    let rows = stmt
+        .query_map([], |r| Ok(FamilyCount { name: r.get(0)?, count: r.get(1)? }))
+        .map_err(e)?;
+    rows.collect::<Result<_, _>>().map_err(e)
+}
+
+/// Years that contain transactions, plus the current year (newest first).
+pub fn list_years(conn: &Connection) -> Res<Vec<i32>> {
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT CAST(substr(date, 1, 4) AS INTEGER) FROM transactions")
+        .map_err(e)?;
+    let mut years: Vec<i32> = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(e)?
+        .collect::<Result<_, _>>()
+        .map_err(e)?;
+    let current = Local::now().year();
+    if !years.contains(&current) {
+        years.push(current);
+    }
+    years.sort_unstable_by(|a, b| b.cmp(a));
+    Ok(years)
+}
+
+/// Suggests the next cheque number for an account: last numeric cheque number used on it + 1.
+pub fn next_cheque_no(conn: &Connection, account_id: i64) -> Res<Option<String>> {
+    let last: Option<String> = conn
+        .query_row(
+            "SELECT t.cheque_no FROM transactions t \
+             WHERE t.cheque_no IS NOT NULL AND t.cheque_no != '' \
+               AND t.id IN (SELECT transaction_id FROM transaction_lines WHERE account_id = ?1) \
+             ORDER BY t.date DESC, t.id DESC LIMIT 1",
+            [account_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(e)?;
+    Ok(last.and_then(|s| increment_number(&s)))
+}
+
+/// "0001234" -> "0001235", "CH-099" -> "CH-100". `None` if it does not end with digits.
+fn increment_number(s: &str) -> Option<String> {
+    let digits: String = s.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<Vec<_>>().into_iter().rev().collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let prefix = &s[..s.len() - digits.len()];
+    let n: u128 = digits.parse().ok()?;
+    Some(format!("{prefix}{:0width$}", n + 1, width = digits.len()))
+}
+
+// ---------------------------------------------------------------------------
 // Transactions
 // ---------------------------------------------------------------------------
 
@@ -373,7 +604,17 @@ fn party_exists(conn: &Connection, id: i64) -> Res<bool> {
 }
 
 /// Validates the input and returns (total, signed lines to store).
-fn plan_lines(conn: &Connection, input: &TxInput) -> Res<(i64, Vec<(i64, i64)>)> {
+/// A line ready to be stored: (account, signed amount, chantier).
+type PlannedLine = (i64, i64, Option<i64>);
+
+fn chantier_exists(conn: &Connection, id: i64) -> Res<bool> {
+    conn.query_row("SELECT 1 FROM chantiers WHERE id = ?1", [id], |_| Ok(()))
+        .optional()
+        .map(|o| o.is_some())
+        .map_err(e)
+}
+
+fn plan_lines(conn: &Connection, input: &TxInput) -> Res<(i64, Vec<PlannedLine>)> {
     let kind = input.kind.as_str();
     if !TX_KINDS.contains(&kind) {
         return Err(format!("Unknown transaction type '{kind}'"));
@@ -387,6 +628,18 @@ fn plan_lines(conn: &Connection, input: &TxInput) -> Res<(i64, Vec<(i64, i64)>)>
             return Err("Selected beneficiary does not exist".into());
         }
     }
+    if let Some(status) = input.status.as_deref() {
+        if !TX_STATUSES.contains(&status) {
+            return Err(format!("Unknown status '{status}'"));
+        }
+    }
+    for cid in input.chantier_id.iter().chain(input.lines.iter().filter_map(|l| l.chantier_id.as_ref())) {
+        if !chantier_exists(conn, *cid)? {
+            return Err("Selected chantier does not exist".into());
+        }
+    }
+    // A line without its own chantier uses the transaction's chantier.
+    let chantier = |l: &LineInput| l.chantier_id.or(input.chantier_id);
     let check_lines = |lines: &[LineInput]| -> Res<i64> {
         if lines.is_empty() {
             return Err("Add at least one account".into());
@@ -406,11 +659,11 @@ fn plan_lines(conn: &Connection, input: &TxInput) -> Res<(i64, Vec<(i64, i64)>)>
     match kind {
         "income" => {
             let total = check_lines(&input.lines)?;
-            Ok((total, input.lines.iter().map(|l| (l.account_id, l.amount)).collect()))
+            Ok((total, input.lines.iter().map(|l| (l.account_id, l.amount, chantier(l))).collect()))
         }
         "expense" => {
             let total = check_lines(&input.lines)?;
-            Ok((total, input.lines.iter().map(|l| (l.account_id, -l.amount)).collect()))
+            Ok((total, input.lines.iter().map(|l| (l.account_id, -l.amount, chantier(l))).collect()))
         }
         "transfer" => {
             if input.party_id.is_some() {
@@ -424,8 +677,8 @@ fn plan_lines(conn: &Connection, input: &TxInput) -> Res<(i64, Vec<(i64, i64)>)>
                 return Err("Cannot transfer an account to itself".into());
             }
             let total = check_lines(&input.lines)?;
-            let mut lines = vec![(from, -total)];
-            lines.extend(input.lines.iter().map(|l| (l.account_id, l.amount)));
+            let mut lines = vec![(from, -total, None)];
+            lines.extend(input.lines.iter().map(|l| (l.account_id, l.amount, None)));
             Ok((total, lines))
         }
         _ => {
@@ -445,7 +698,13 @@ fn plan_lines(conn: &Connection, input: &TxInput) -> Res<(i64, Vec<(i64, i64)>)>
 pub fn save_transaction(conn: &mut Connection, input: &TxInput) -> Res<Transaction> {
     let (total, lines) = plan_lines(conn, input)?;
     let label = input.label.split_whitespace().collect::<Vec<_>>().join(" ");
+    let clean = |o: &Option<String>| o.as_ref().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty());
     let notes = input.notes.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let family = clean(&input.family);
+    let cheque_no = clean(&input.cheque_no);
+    let cheque_payee = clean(&input.cheque_payee);
+    let status = input.status.clone().unwrap_or_else(|| "ok".into());
+    let chantier_id = if input.kind == "transfer" { None } else { input.chantier_id };
     let tx = conn.transaction().map_err(e)?;
     let mut previous_key = None;
     let id = match input.id {
@@ -457,8 +716,12 @@ pub fn save_transaction(conn: &mut Connection, input: &TxInput) -> Res<Transacti
                 .map(|l| suggest::normalize(&l));
             let n = tx
                 .execute(
-                    "UPDATE transactions SET date=?1, kind=?2, label=?3, party_id=?4, amount=?5, notes=?6 WHERE id=?7",
-                    params![input.date, input.kind, label, input.party_id, total, notes, id],
+                    "UPDATE transactions SET date=?1, kind=?2, label=?3, party_id=?4, amount=?5, notes=?6, chantier_id=?7, \
+                     family=?8, status=?9, cheque_no=?10, cheque_crossed=?11, cheque_payee=?12 WHERE id=?13",
+                    params![
+                        input.date, input.kind, label, input.party_id, total, notes, chantier_id,
+                        family, status, cheque_no, input.cheque_crossed as i64, cheque_payee, id
+                    ],
                 )
                 .map_err(e)?;
             if n == 0 {
@@ -469,17 +732,21 @@ pub fn save_transaction(conn: &mut Connection, input: &TxInput) -> Res<Transacti
         }
         None => {
             tx.execute(
-                "INSERT INTO transactions (date, kind, label, party_id, amount, notes, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
-                params![input.date, input.kind, label, input.party_id, total, notes, now_str()],
+                "INSERT INTO transactions (date, kind, label, party_id, amount, notes, created_at, chantier_id, family, status, \
+                 cheque_no, cheque_crossed, cheque_payee) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                params![
+                    input.date, input.kind, label, input.party_id, total, notes, now_str(), chantier_id,
+                    family, status, cheque_no, input.cheque_crossed as i64, cheque_payee
+                ],
             )
             .map_err(e)?;
             tx.last_insert_rowid()
         }
     };
-    for (account_id, amount) in &lines {
+    for (account_id, amount, chantier) in &lines {
         tx.execute(
-            "INSERT INTO transaction_lines (transaction_id, account_id, amount) VALUES (?1,?2,?3)",
-            params![id, account_id, amount],
+            "INSERT INTO transaction_lines (transaction_id, account_id, amount, chantier_id) VALUES (?1,?2,?3,?4)",
+            params![id, account_id, amount, chantier],
         )
         .map_err(e)?;
     }
@@ -504,6 +771,13 @@ fn row_to_tx(r: &Row) -> rusqlite::Result<Transaction> {
         label: r.get("label")?,
         party_id: r.get("party_id")?,
         party_name: r.get("party_name")?,
+        chantier_id: r.get("chantier_id")?,
+        chantier_name: r.get("chantier_name")?,
+        family: r.get("family")?,
+        status: r.get("status")?,
+        cheque_no: r.get("cheque_no")?,
+        cheque_crossed: r.get::<_, i64>("cheque_crossed")? != 0,
+        cheque_payee: r.get("cheque_payee")?,
         amount: r.get("amount")?,
         notes: r.get("notes")?,
         lines: vec![],
@@ -516,14 +790,21 @@ fn row_to_tx(r: &Row) -> rusqlite::Result<Transaction> {
 fn load_lines(conn: &Connection, txs: &mut [Transaction]) -> Res<()> {
     let mut stmt = conn
         .prepare_cached(
-            "SELECT l.account_id, a.name, l.amount FROM transaction_lines l JOIN accounts a ON a.id = l.account_id \
+            "SELECT l.account_id, a.name, l.amount, l.chantier_id, c.name FROM transaction_lines l \
+             JOIN accounts a ON a.id = l.account_id LEFT JOIN chantiers c ON c.id = l.chantier_id \
              WHERE l.transaction_id = ?1 ORDER BY l.id",
         )
         .map_err(e)?;
     for t in txs.iter_mut() {
         let rows = stmt
             .query_map([t.id], |r| {
-                Ok(LineView { account_id: r.get(0)?, account_name: r.get(1)?, amount: r.get(2)? })
+                Ok(LineView {
+                    account_id: r.get(0)?,
+                    account_name: r.get(1)?,
+                    amount: r.get(2)?,
+                    chantier_id: r.get(3)?,
+                    chantier_name: r.get(4)?,
+                })
             })
             .map_err(e)?;
         t.lines = rows.collect::<Result<_, _>>().map_err(e)?;
@@ -531,7 +812,8 @@ fn load_lines(conn: &Connection, txs: &mut [Transaction]) -> Res<()> {
     Ok(())
 }
 
-const TX_SELECT: &str = "SELECT t.*, p.name AS party_name FROM transactions t LEFT JOIN parties p ON p.id = t.party_id";
+const TX_SELECT: &str = "SELECT t.*, p.name AS party_name, c.name AS chantier_name FROM transactions t \
+     LEFT JOIN parties p ON p.id = t.party_id LEFT JOIN chantiers c ON c.id = t.chantier_id";
 
 pub fn get_transaction(conn: &Connection, id: i64) -> Res<Transaction> {
     let mut t = conn
@@ -567,10 +849,33 @@ fn query_transactions(conn: &Connection, f: &TxFilter, ascending: bool) -> Res<V
         sql.push_str(" AND t.party_id = ?");
         args.push(pid.into());
     }
+    if let Some(cid) = f.chantier_id {
+        sql.push_str(" AND (t.chantier_id = ? OR t.id IN (SELECT transaction_id FROM transaction_lines WHERE chantier_id = ?))");
+        args.extend([cid.into(), cid.into()]);
+    }
+    if let Some(fam) = f.family.as_ref().filter(|s| !s.is_empty()) {
+        sql.push_str(" AND t.family = ? COLLATE NOCASE");
+        args.push(fam.clone().into());
+    }
+    if let Some(st) = f.status.as_ref().filter(|s| !s.is_empty()) {
+        sql.push_str(" AND t.status = ?");
+        args.push(st.clone().into());
+    }
     if let Some(s) = f.search.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        sql.push_str(" AND (t.label LIKE ? OR t.notes LIKE ? OR p.name LIKE ?)");
-        let like = format!("%{s}%");
-        args.extend([like.clone().into(), like.clone().into(), like.into()]);
+        // Also matches the transaction number ("1257") and amounts typed in major units.
+        sql.push_str(
+            " AND (t.label LIKE ? OR t.notes LIKE ? OR p.name LIKE ? OR c.name LIKE ? OR t.family LIKE ? \
+             OR t.cheque_no LIKE ? OR t.cheque_payee LIKE ? OR CAST(t.id AS TEXT) = ? \
+             OR t.id IN (SELECT l.transaction_id FROM transaction_lines l JOIN accounts a ON a.id = l.account_id \
+                         LEFT JOIN chantiers lc ON lc.id = l.chantier_id WHERE a.name LIKE ? OR lc.name LIKE ?))",
+        );
+        let like: rusqlite::types::Value = format!("%{s}%").into();
+        for _ in 0..7 {
+            args.push(like.clone());
+        }
+        args.push(s.to_string().into());
+        args.push(like.clone());
+        args.push(like);
     }
     if ascending {
         sql.push_str(" ORDER BY t.date ASC, t.id ASC");
@@ -633,6 +938,7 @@ fn learn(conn: &Connection, label: &str, input: &TxInput, total: i64, now: DateT
         return Ok(());
     }
     let lines_json = serde_json::to_string(&input.lines).map_err(e)?;
+    let family = input.family.as_deref().map(str::trim).filter(|f| !f.is_empty());
     let existing: Option<(i64, Option<i64>)> = conn
         .query_row("SELECT uses, avg_amount FROM label_memory WHERE key = ?1", [&key], |r| {
             Ok((r.get(0)?, r.get(1)?))
@@ -648,14 +954,27 @@ fn learn(conn: &Connection, label: &str, input: &TxInput, total: i64, now: DateT
         None => (1, total),
     };
     conn.execute(
-        "INSERT INTO label_memory (key, label, uses, last_used, last_kind, last_party_id, last_amount, avg_amount, last_from_account_id, last_lines) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) \
+        "INSERT INTO label_memory (key, label, uses, last_used, last_kind, last_party_id, last_amount, avg_amount, \
+         last_from_account_id, last_lines, last_chantier_id, last_family) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) \
          ON CONFLICT(key) DO UPDATE SET label=excluded.label, uses=excluded.uses, last_used=excluded.last_used, last_kind=excluded.last_kind, \
          last_party_id=excluded.last_party_id, last_amount=excluded.last_amount, avg_amount=excluded.avg_amount, \
-         last_from_account_id=excluded.last_from_account_id, last_lines=excluded.last_lines",
-        params![key, label, uses, now.to_rfc3339(), input.kind, input.party_id, total, avg, input.from_account_id, lines_json],
+         last_from_account_id=excluded.last_from_account_id, last_lines=excluded.last_lines, \
+         last_chantier_id=excluded.last_chantier_id, last_family=excluded.last_family",
+        params![
+            key, label, uses, now.to_rfc3339(), input.kind, input.party_id, total, avg, input.from_account_id, lines_json,
+            input.chantier_id, family
+        ],
     )
     .map_err(e)?;
+    if let Some(cid) = input.chantier_id {
+        conn.execute(
+            "INSERT INTO label_context (key, kind, party_id, uses) VALUES (?1, ?2, ?3, 1) \
+             ON CONFLICT(key, kind, party_id) DO UPDATE SET uses = uses + 1",
+            params![key, CHANTIER_CTX, cid],
+        )
+        .map_err(e)?;
+    }
     // Context counters: per kind (party 0) and per kind+party.
     let mut ctx = vec![0i64];
     if let Some(pid) = input.party_id {
@@ -686,17 +1005,20 @@ pub fn suggest_labels_at(conn: &Connection, q: &SuggestQuery, now: DateTime<Utc>
     let query = suggest::normalize(&q.query);
     let kind = q.kind.clone().unwrap_or_default();
     let party = q.party_id.unwrap_or(-1);
+    let chantier = q.chantier_id.unwrap_or(-1);
     let mut stmt = conn
         .prepare(
             "SELECT m.key, m.label, m.uses, m.last_used, m.last_kind, m.last_party_id, m.last_amount, m.avg_amount, \
                     m.last_from_account_id, m.last_lines, \
                     COALESCE((SELECT SUM(c.uses) FROM label_context c WHERE c.key = m.key AND c.kind = ?1 AND c.party_id = 0), 0), \
-                    COALESCE((SELECT SUM(c.uses) FROM label_context c WHERE c.key = m.key AND c.party_id = ?2), 0) \
+                    COALESCE((SELECT SUM(c.uses) FROM label_context c WHERE c.key = m.key AND c.kind != ?3 AND c.party_id = ?2), 0), \
+                    COALESCE((SELECT SUM(c.uses) FROM label_context c WHERE c.key = m.key AND c.kind = ?3 AND c.party_id = ?4), 0), \
+                    m.last_chantier_id, m.last_family \
              FROM label_memory m",
         )
         .map_err(e)?;
     let rows = stmt
-        .query_map(params![kind, party], |r| {
+        .query_map(params![kind, party, CHANTIER_CTX, chantier], |r| {
             let last_lines: Option<String> = r.get(9)?;
             Ok((
                 Suggestion {
@@ -709,6 +1031,8 @@ pub fn suggest_labels_at(conn: &Connection, q: &SuggestQuery, now: DateTime<Utc>
                     last_amount: r.get(6)?,
                     avg_amount: r.get(7)?,
                     last_from_account_id: r.get(8)?,
+                    last_chantier_id: r.get(13)?,
+                    last_family: r.get(14)?,
                     last_lines: last_lines
                         .and_then(|s| serde_json::from_str(&s).ok())
                         .unwrap_or_default(),
@@ -716,21 +1040,22 @@ pub fn suggest_labels_at(conn: &Connection, q: &SuggestQuery, now: DateTime<Utc>
                 },
                 r.get::<_, i64>(10)?,
                 r.get::<_, i64>(11)?,
+                r.get::<_, i64>(12)?,
             ))
         })
         .map_err(e)?;
     let mut out = vec![];
     for row in rows {
-        let (mut s, kind_uses, party_uses) = row.map_err(e)?;
+        let (mut s, kind_uses, party_uses, chantier_uses) = row.map_err(e)?;
         let cand = suggest::Candidate {
             key: s.key.clone(),
             uses: s.uses,
             last_used: parse_time(&s.last_used),
             kind_uses,
             party_uses,
+            chantier_uses,
         };
         if let Some(score) = suggest::score(&query, &cand, now) {
-            // Do not suggest exactly what is already typed unless it brings learned data.
             s.score = score;
             out.push(s);
         }
@@ -741,7 +1066,7 @@ pub fn suggest_labels_at(conn: &Connection, q: &SuggestQuery, now: DateTime<Utc>
 }
 
 pub fn list_learned_labels(conn: &Connection) -> Res<Vec<Suggestion>> {
-    suggest_labels(conn, &SuggestQuery { query: String::new(), kind: None, party_id: None, limit: Some(10_000) })
+    suggest_labels(conn, &SuggestQuery { query: String::new(), limit: Some(10_000), ..Default::default() })
 }
 
 pub fn forget_label(conn: &Connection, key: &str) -> Res<()> {
@@ -764,10 +1089,12 @@ pub fn relearn_all(conn: &mut Connection) -> Res<usize> {
             kind: t.kind.clone(),
             label: t.label.clone(),
             party_id: t.party_id,
+            chantier_id: t.chantier_id,
+            family: t.family.clone(),
             from_account_id: from,
             amount: Some(t.amount),
             lines,
-            notes: None,
+            ..Default::default()
         };
         learn(&tx, &t.label, &input, t.amount, parse_time(&t.created_at))?;
     }
@@ -784,13 +1111,21 @@ fn split_back(t: &Transaction) -> (Option<i64>, Vec<LineInput>) {
                 .lines
                 .iter()
                 .filter(|l| l.amount > 0)
-                .map(|l| LineInput { account_id: l.account_id, amount: l.amount })
+                .map(|l| LineInput { account_id: l.account_id, amount: l.amount, chantier_id: None })
                 .collect();
             (from, lines)
         }
         _ => (
             None,
-            t.lines.iter().map(|l| LineInput { account_id: l.account_id, amount: l.amount.abs() }).collect(),
+            t.lines
+                .iter()
+                .map(|l| LineInput {
+                    account_id: l.account_id,
+                    amount: l.amount.abs(),
+                    // Only remember a per-line chantier when it differs from the transaction's.
+                    chantier_id: l.chantier_id.filter(|c| Some(*c) != t.chantier_id),
+                })
+                .collect(),
         ),
     }
 }
@@ -901,6 +1236,24 @@ pub fn report(conn: &Connection, from: &str, to: &str) -> Res<Report> {
         .map_err(e)?
         .collect::<Result<_, _>>()
         .map_err(e)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT COALESCE(NULLIF(family, ''), ''), kind, SUM(amount), COUNT(*) FROM transactions \
+             WHERE date >= ?1 AND date <= ?2 AND kind != 'transfer' \
+             GROUP BY lower(COALESCE(family, '')), kind ORDER BY SUM(amount) DESC",
+        )
+        .map_err(e)?;
+    let by_family: Vec<LabelTotal> = stmt
+        .query_map(params![from, to], |r| {
+            Ok(LabelTotal { label: r.get(0)?, kind: r.get(1)?, total: r.get(2)?, count: r.get(3)? })
+        })
+        .map_err(e)?
+        .collect::<Result<_, _>>()
+        .map_err(e)?;
+    let by_chantier = list_chantiers_between(conn, true, from, to)?
+        .into_iter()
+        .filter(|c| c.income != 0 || c.expense != 0 || c.purchases != 0)
+        .collect();
     let sum = |k: &str| by_label.iter().filter(|l| l.kind == k).map(|l| l.total).sum::<i64>();
     let f = NaiveDate::parse_from_str(from, "%Y-%m-%d").unwrap();
     let t = NaiveDate::parse_from_str(to, "%Y-%m-%d").unwrap();
@@ -911,6 +1264,8 @@ pub fn report(conn: &Connection, from: &str, to: &str) -> Res<Report> {
         sales: sum("sale"),
         monthly: fill_months(month_series(conn, from, to)?, f, t),
         by_label,
+        by_family,
+        by_chantier,
     })
 }
 
@@ -919,44 +1274,73 @@ pub fn report(conn: &Connection, from: &str, to: &str) -> Res<Report> {
 // ---------------------------------------------------------------------------
 
 fn csv_field(s: &str) -> String {
-    if s.contains([',', '"', '\n', '\r']) {
+    if s.contains([';', ',', '"', '\n', '\r']) {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
     }
 }
 
-/// CSV of all transactions (amounts in major units using `decimals`).
+/// CSV of all transactions, one row per account line, `;`-separated so Excel opens it directly.
+/// Headers, type names and the decimal separator follow the `language` setting.
 pub fn export_csv(conn: &Connection) -> Res<String> {
     let decimals: u32 = get_setting(conn, "decimals")?.and_then(|d| d.parse().ok()).unwrap_or(2);
+    let fr = get_setting(conn, "language")?.as_deref() != Some("en");
     let fmt = |v: i64| -> String {
         if decimals == 0 {
             return v.to_string();
         }
         let div = 10i64.pow(decimals);
         let sign = if v < 0 { "-" } else { "" };
-        format!("{sign}{}.{:0width$}", v.abs() / div, v.abs() % div, width = decimals as usize)
+        let sep = if fr { "," } else { "." };
+        format!("{sign}{}{sep}{:0width$}", v.abs() / div, v.abs() % div, width = decimals as usize)
     };
-    let txs = list_transactions(conn, &TxFilter::default())?;
-    let mut out = String::from("id,date,type,label,beneficiary,amount,accounts,notes\n");
+    let kind_name = |k: &str| -> &'static str {
+        match (k, fr) {
+            ("income", true) => "Versement",
+            ("expense", true) => "Dépense",
+            ("transfer", true) => "Virement",
+            ("purchase", true) => "Achat à crédit",
+            ("sale", true) => "Vente à crédit",
+            ("income", false) => "Deposit",
+            ("expense", false) => "Expense",
+            ("transfer", false) => "Transfer",
+            ("purchase", false) => "Purchase on credit",
+            _ => "Sale on credit",
+        }
+    };
+    let header = if fr {
+        "N°;Date;Type;Compte;Chantier;Bénéficiaire;Famille;Libellé;Montant;État;Chèque N°;Ordre de;Notes\n"
+    } else {
+        "No;Date;Type;Account;Chantier;Beneficiary;Family;Label;Amount;Status;Cheque No;Payee;Notes\n"
+    };
+    let mut out = String::from(header);
+    let txs = query_transactions(conn, &TxFilter::default(), true)?;
     for t in txs {
-        let accounts = t
-            .lines
-            .iter()
-            .map(|l| format!("{}: {}", l.account_name, fmt(l.amount)))
-            .collect::<Vec<_>>()
-            .join(" | ");
-        out.push_str(&format!(
-            "{},{},{},{},{},{},{},{}\n",
-            t.id,
-            t.date,
-            t.kind,
-            csv_field(&t.label),
-            csv_field(t.party_name.as_deref().unwrap_or("")),
-            fmt(t.amount),
-            csv_field(&accounts),
-            csv_field(t.notes.as_deref().unwrap_or("")),
-        ));
+        let rows: Vec<(String, Option<String>, i64)> = if t.lines.is_empty() {
+            vec![(String::new(), t.chantier_name.clone(), t.amount)]
+        } else {
+            t.lines.iter().map(|l| (l.account_name.clone(), l.chantier_name.clone(), l.amount)).collect()
+        };
+        for (account, chantier, amount) in rows {
+            let fields = [
+                t.id.to_string(),
+                t.date.clone(),
+                kind_name(&t.kind).to_string(),
+                csv_field(&account),
+                csv_field(chantier.as_deref().unwrap_or("")),
+                csv_field(t.party_name.as_deref().unwrap_or("")),
+                csv_field(t.family.as_deref().unwrap_or("")),
+                csv_field(&t.label),
+                fmt(amount),
+                t.status.clone(),
+                csv_field(t.cheque_no.as_deref().unwrap_or("")),
+                csv_field(t.cheque_payee.as_deref().unwrap_or("")),
+                csv_field(t.notes.as_deref().unwrap_or("")),
+            ];
+            out.push_str(&fields.join(";"));
+            out.push('\n');
+        }
     }
     Ok(out)
 }
@@ -997,7 +1381,7 @@ mod tests {
             date: "2026-10-01".into(),
             kind: kind.into(),
             label: label.into(),
-            lines: lines.into_iter().map(|(a, m)| LineInput { account_id: a, amount: m }).collect(),
+            lines: lines.into_iter().map(|(a, m)| LineInput { account_id: a, amount: m, chantier_id: None }).collect(),
             ..Default::default()
         }
     }
@@ -1007,7 +1391,7 @@ mod tests {
         let c = db();
         let accounts = list_accounts(&c, false).unwrap();
         assert_eq!(accounts.len(), 1);
-        assert_eq!(accounts[0].name, "Cash");
+        assert_eq!(accounts[0].name, "Caisse");
     }
 
     #[test]
@@ -1121,7 +1505,7 @@ mod tests {
         // Context: with the party selected and kind income, the deposit ranks first and remembers the split.
         let s = suggest_labels(
             &c,
-            &SuggestQuery { query: "f".into(), kind: Some("income".into()), party_id: Some(sup), limit: None },
+            &SuggestQuery { query: "f".into(), kind: Some("income".into()), party_id: Some(sup), ..Default::default() },
         )
         .unwrap();
         assert_eq!(s[0].label, "Fund deposit");
@@ -1146,7 +1530,7 @@ mod tests {
         assert_eq!(r.monthly.len(), 12);
         let csv = export_csv(&c).unwrap();
         assert!(csv.contains("\"Sale, \"\"big\"\"\""));
-        assert!(csv.contains("123.45"));
+        assert!(csv.contains(";123,45;"), "{csv}");
     }
 
     #[test]
@@ -1156,6 +1540,160 @@ mod tests {
         assert_eq!(d.monthly.len(), 12);
         assert_eq!(d.monthly[0].month, "2025-11");
         assert_eq!(d.monthly[11].month, "2026-10");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::inconsistent_digit_grouping)]
+mod chantier_tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        c
+    }
+
+    fn chantier(c: &Connection, name: &str) -> i64 {
+        save_chantier(c, &ChantierInput { name: name.into(), ..Default::default() }).unwrap().id
+    }
+
+    #[test]
+    fn deposit_same_or_different_chantier_per_line() {
+        let mut c = db();
+        let cash = list_accounts(&c, false).unwrap()[0].id;
+        let bank = save_account(&c, &AccountInput { name: "Banque".into(), kind: "bank".into(), ..Default::default() })
+            .unwrap()
+            .id;
+        let a = chantier(&c, "200 OPGI");
+        let b = chantier(&c, "136 LOGTS");
+        // Same chantier for both accounts (header), second line overrides it.
+        let mut t = TxInput {
+            date: "2026-09-29".into(),
+            kind: "income".into(),
+            label: "Versement".into(),
+            chantier_id: Some(a),
+            lines: vec![
+                LineInput { account_id: cash, amount: 100_00, chantier_id: None },
+                LineInput { account_id: bank, amount: 50_00, chantier_id: Some(b) },
+            ],
+            ..Default::default()
+        };
+        let saved = save_transaction(&mut c, &t).unwrap();
+        assert_eq!(saved.lines[0].chantier_name.as_deref(), Some("200 OPGI"));
+        assert_eq!(saved.lines[1].chantier_name.as_deref(), Some("136 LOGTS"));
+        assert_eq!(saved.status, "ok");
+
+        t.kind = "expense".into();
+        t.label = "Ciment".into();
+        t.family = Some("  Matériaux ".into());
+        t.cheque_no = Some("0001234".into());
+        t.cheque_payee = Some("SARL CIMENT".into());
+        t.cheque_crossed = true;
+        t.status = Some("pending".into());
+        t.lines = vec![LineInput { account_id: bank, amount: 30_00, chantier_id: None }];
+        let exp = save_transaction(&mut c, &t).unwrap();
+        assert_eq!(exp.family.as_deref(), Some("Matériaux"));
+        assert!(exp.cheque_crossed);
+
+        // A purchase on credit is listed on the chantier but does not move its cash balance.
+        let supplier = save_party(&c, &PartyInput { name: "Fournisseur".into(), kind: "supplier".into(), ..Default::default() })
+            .unwrap()
+            .id;
+        save_transaction(
+            &mut c,
+            &TxInput {
+                date: "2026-09-30".into(),
+                kind: "purchase".into(),
+                label: "Facture".into(),
+                party_id: Some(supplier),
+                chantier_id: Some(a),
+                amount: Some(20_00),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let ca = get_chantier(&c, a).unwrap();
+        assert_eq!((ca.income, ca.expense, ca.purchases), (100_00, 30_00, 20_00));
+        let cb = get_chantier(&c, b).unwrap();
+        assert_eq!((cb.income, cb.expense), (50_00, 0));
+
+        let (_, st) = chantier_statement(&c, a).unwrap();
+        assert_eq!(st.len(), 3);
+        assert_eq!(st[0].effect, Some(-20_00));
+        assert_eq!(st[0].running_balance, Some(70_00));
+
+        // Filters
+        let f = |f: TxFilter| list_transactions(&c, &f).unwrap().len();
+        assert_eq!(f(TxFilter { chantier_id: Some(b), ..Default::default() }), 1);
+        assert_eq!(f(TxFilter { status: Some("pending".into()), ..Default::default() }), 1);
+        assert_eq!(f(TxFilter { search: Some("opgi".into()), ..Default::default() }), 3);
+        assert_eq!(f(TxFilter { search: Some("0001234".into()), ..Default::default() }), 1);
+        assert_eq!(f(TxFilter { family: Some("matériaux".into()), ..Default::default() }), 1);
+
+        assert_eq!(list_families(&c).unwrap()[0].name, "Matériaux");
+        assert_eq!(next_cheque_no(&c, bank).unwrap().as_deref(), Some("0001235"));
+        assert_eq!(next_cheque_no(&c, cash).unwrap(), None);
+        assert!(list_years(&c).unwrap().contains(&2026));
+
+        // The learned label remembers family and chantier.
+        let s = suggest_labels(&c, &SuggestQuery { query: "ci".into(), chantier_id: Some(a), ..Default::default() }).unwrap();
+        assert_eq!(s[0].last_family.as_deref(), Some("Matériaux"));
+        assert_eq!(s[0].last_chantier_id, Some(a));
+
+        // A used chantier is archived, not deleted.
+        assert!(!delete_chantier(&c, a).unwrap());
+        let unused = chantier(&c, "Unused");
+        assert!(delete_chantier(&c, unused).unwrap());
+        assert_eq!(report(&c, "2026-01-01", "2026-12-31").unwrap().by_chantier.len(), 2);
+    }
+
+    #[test]
+    fn chantier_context_ranks_labels() {
+        let mut c = db();
+        let cash = list_accounts(&c, false).unwrap()[0].id;
+        let a = chantier(&c, "A");
+        let b = chantier(&c, "B");
+        for (label, ch) in [("Sable A", a), ("Sable B", b), ("Sable B", b)] {
+            save_transaction(
+                &mut c,
+                &TxInput {
+                    date: "2026-01-01".into(),
+                    kind: "expense".into(),
+                    label: label.into(),
+                    chantier_id: Some(ch),
+                    lines: vec![LineInput { account_id: cash, amount: 1, chantier_id: None }],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let top = |ch| suggest_labels(&c, &SuggestQuery { query: "sab".into(), chantier_id: Some(ch), ..Default::default() }).unwrap()[0]
+            .label
+            .clone();
+        assert_eq!(top(a), "Sable A");
+        assert_eq!(top(b), "Sable B");
+    }
+
+    #[test]
+    fn migrates_a_version_0_database() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        c.execute("INSERT INTO accounts (name, kind, created_at) VALUES ('Cash', 'cash', '')", []).unwrap();
+        c.execute("INSERT INTO transactions (date, kind, label, amount, created_at) VALUES ('2026-01-01', 'income', 'x', 5, '')", [])
+            .unwrap();
+        init(&c).unwrap();
+        init(&c).unwrap(); // idempotent
+        let t = list_transactions(&c, &TxFilter::default()).unwrap();
+        assert_eq!(t[0].status, "ok");
+    }
+
+    #[test]
+    fn increments_cheque_numbers() {
+        assert_eq!(increment_number("0099").as_deref(), Some("0100"));
+        assert_eq!(increment_number("CH-99").as_deref(), Some("CH-100"));
+        assert_eq!(increment_number("abc"), None);
     }
 }
 
@@ -1171,41 +1709,65 @@ mod demo {
         let path = std::env::var("DEMO_DB").expect("DEMO_DB");
         let _ = std::fs::remove_file(&path);
         let mut c = open(Path::new(&path)).unwrap();
-        let cash = list_accounts(&c, false).unwrap()[0].id;
+        set_setting(&c, "company_name", "ETCE Exemple BTP").unwrap();
+        set_setting(&c, "company_activity", "Entreprise de construction — Alger").unwrap();
+        set_setting(&c, "cheque_city", "Alger").unwrap();
+        let caisse = list_accounts(&c, false).unwrap()[0].id;
         let mk = |c: &Connection, n: &str, k: &str, col: &str| {
             save_account(c, &AccountInput { name: n.into(), kind: k.into(), color: Some(col.into()), ..Default::default() }).unwrap().id
         };
-        let bank = mk(&c, "Bank BNA", "bank", "#2563eb");
-        let villa = mk(&c, "Project Villa", "project", "#9333ea");
-        let shop = mk(&c, "Project Shop", "project", "#ea580c");
+        let bna = mk(&c, "Banque BNA", "bank", "#2563eb");
+        let cpa = mk(&c, "Banque CPA", "bank", "#0891b2");
+        let caisse2 = mk(&c, "Nouveau caisse", "cash", "#ea580c");
+        let ch = |c: &Connection, n: &str, client: &str| {
+            save_chantier(c, &ChantierInput { name: n.into(), client: Some(client.into()), ..Default::default() }).unwrap().id
+        };
+        let opgi = ch(&c, "200 LOGTS OPGI", "OPGI");
+        let l136 = ch(&c, "136 LOGTS", "Promotion Sami");
+        let lpa = ch(&c, "17 LPA", "AADL");
         let p = |c: &Connection, n: &str, k: &str| {
             save_party(c, &PartyInput { name: n.into(), kind: k.into(), ..Default::default() }).unwrap().id
         };
-        let cement = p(&c, "Cement Supplier Co.", "supplier");
-        let ahmed = p(&c, "Ahmed", "person");
-        let client = p(&c, "Client Karim", "client");
-        let mut add = |date: &str, kind: &str, label: &str, party: Option<i64>, from: Option<i64>, amount: Option<i64>, lines: Vec<(i64, i64)>| {
-            save_transaction(&mut c, &TxInput {
-                date: date.into(), kind: kind.into(), label: label.into(), party_id: party, from_account_id: from, amount,
-                lines: lines.into_iter().map(|(a, m)| LineInput { account_id: a, amount: m }).collect(),
+        let ciment = p(&c, "SARL Ciment Est", "supplier");
+        let placo = p(&c, "Salah Placo", "supplier");
+        let grue = p(&c, "Kamel Location Grue", "supplier");
+        let karim = p(&c, "Karim (chef d'équipe)", "employee");
+        let opgi_client = p(&c, "OPGI", "client");
+        #[allow(clippy::too_many_arguments)]
+        fn add(
+            c: &mut Connection, date: &str, kind: &str, label: &str, family: Option<&str>, party: Option<i64>,
+            chantier: Option<i64>, from: Option<i64>, amount: Option<i64>, lines: Vec<(i64, i64, Option<i64>)>, cheque: Option<&str>,
+        ) {
+            save_transaction(c, &TxInput {
+                date: date.into(), kind: kind.into(), label: label.into(), family: family.map(Into::into), party_id: party,
+                chantier_id: chantier, from_account_id: from, amount, cheque_no: cheque.map(Into::into), cheque_crossed: cheque.is_some(),
+                lines: lines.into_iter().map(|(a, m, ch)| LineInput { account_id: a, amount: m, chantier_id: ch }).collect(),
                 ..Default::default()
             }).unwrap();
-        };
+        }
         let months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"];
+        let mut chq = 4100;
         for (i, m) in months.iter().enumerate() {
             let i = i as i64;
-            add(&format!("{m}-01"), "sale", "Villa works invoice", Some(client), None, Some(6200_00 + i * 150_00), vec![]);
-            add(&format!("{m}-02"), "income", "Client payment", Some(client), None, None, vec![(cash, 3000_00 + i * 150_00), (villa, 2000_00), (shop, 1000_00)]);
-            add(&format!("{m}-05"), "expense", "Fuel truck", None, None, None, vec![(cash, 120_00 + i * 5_00)]);
-            add(&format!("{m}-08"), "expense", "Office rent", None, None, None, vec![(bank, 900_00)]);
-            add(&format!("{m}-10"), "purchase", "Cement delivery", Some(cement), None, Some(1500_00 + i * 100_00), vec![]);
-            add(&format!("{m}-12"), "expense", "Payment to supplier", Some(cement), None, None, vec![(villa, 1200_00)]);
-            add(&format!("{m}-15"), "transfer", "Cash to bank", None, Some(cash), None, vec![(bank, 1500_00)]);
-            add(&format!("{m}-20"), "expense", "Workers salary", None, None, None, vec![(villa, 700_00), (shop, 300_00)]);
+            let c = &mut c;
+            add(c, &format!("{m}-01"), "sale", "Situation travaux N°", Some("Situations"), Some(opgi_client), Some(opgi), None, Some(4_500_000_00 + i * 50_000_00), vec![], None);
+            add(c, &format!("{m}-03"), "income", "Versement client OPGI", Some("Situations"), Some(opgi_client), Some(opgi), None, None,
+                vec![(bna, 3_000_000_00, None), (caisse, 800_000_00, Some(l136)), (caisse2, 400_000_00, Some(lpa))], None);
+            add(c, &format!("{m}-05"), "purchase", "Ciment CPJ 45 // 200 OPGI", Some("Matériaux"), Some(ciment), Some(opgi), None, Some(1_200_000_00 + i * 20_000_00), vec![], None);
+            chq += 1;
+            add(c, &format!("{m}-07"), "expense", "Règlement ciment", Some("Matériaux"), Some(ciment), Some(opgi), None, None, vec![(bna, 1_000_000_00, None)], Some(&format!("000{chq}")));
+            add(c, &format!("{m}-10"), "expense", "Achat sable 0.40 // 200 OPGI", Some("Matériaux"), None, Some(opgi), None, None, vec![(caisse, 8_288_00 + i * 150_00, None)], None);
+            add(c, &format!("{m}-12"), "expense", "Avance personnel", Some("Salaires"), Some(karim), Some(l136), None, None, vec![(caisse2, 20_000_00, None)], None);
+            add(c, &format!("{m}-15"), "expense", "Salaire personnel", Some("Salaires"), None, Some(opgi), None, None,
+                vec![(caisse, 350_000_00, None), (caisse2, 150_000_00, Some(lpa))], None);
+            add(c, &format!("{m}-16"), "purchase", "Facture placo 136 LOGTS", Some("Sous-traitance"), Some(placo), Some(l136), None, Some(40_000_00), vec![], None);
+            add(c, &format!("{m}-17"), "purchase", "Facture location grue", Some("Location engins"), Some(grue), Some(opgi), None, Some(200_000_00), vec![], None);
+            add(c, &format!("{m}-18"), "expense", "Placo 136 LOGTS", Some("Sous-traitance"), Some(placo), Some(l136), None, None, vec![(caisse, 35_500_00, None)], None);
+            add(c, &format!("{m}-20"), "expense", "Location grue à tour", Some("Location engins"), Some(grue), Some(opgi), None, None, vec![(cpa, 200_000_00, None)], None);
+            add(c, &format!("{m}-22"), "transfer", "Alimentation caisse", None, None, None, Some(bna), None, vec![(caisse, 400_000_00, None)], None);
+            add(c, &format!("{m}-25"), "expense", "Gasoil camion", Some("Transport"), None, Some(lpa), None, None, vec![(caisse2, 6_050_00, None)], None);
         }
-        add("2026-09-25", "expense", "Loan to Ahmed", Some(ahmed), None, None, vec![(cash, 500_00)]);
-        add("2026-10-03", "income", "Ahmed repaid part", Some(ahmed), None, None, vec![(cash, 200_00)]);
-        add("2026-10-06", "expense", "Fuel generator", None, None, None, vec![(shop, 60_00)]);
-        add("2026-10-07", "expense", "Furniture", None, None, None, vec![(shop, 850_00)]);
+        add(&mut c, "2026-09-29", "expense", "Déplacement grue à tour", Some("Location engins"), Some(grue), Some(opgi), None, None, vec![(cpa, 30_000_00, None)], None);
+        add(&mut c, "2026-09-29", "income", "Versement associé", Some("Apports"), None, None, None, None, vec![(cpa, 500_000_00, None)], None);
     }
 }
