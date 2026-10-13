@@ -1,31 +1,67 @@
-# Builds the Windows installers of a version and publishes them on the GitHub "Releases" page.
+# Builds the Windows installers of each version and publishes them on the GitHub "Releases" page.
 #
-# - Pushing a tag like `v0.4.0` builds that version automatically.
-# - Older versions (tags created before this workflow existed) can be built from the
-#   Actions tab: "Build installers" → "Run workflow" → enter the tag, e.g. `v0.1.0`.
+# - Every push checks the version in package.json; if release `v<version>` does not exist yet,
+#   the installers are built and the release (and its tag) is created on that commit.
+#   So a new version is published by raising the version number (package.json, Cargo.toml,
+#   tauri.conf.json) in a commit.
+# - Older versions can be built from the Actions tab: "Build installers" → "Run workflow",
+#   with the commit and the version number (see CHANGELOG.md for the commit of each version).
 name: Build installers
 
 on:
   push:
-    tags: ["v*"]
+    branches: ["**"]
   workflow_dispatch:
     inputs:
+      commit:
+        description: "Commit (SHA) to build"
+        required: true
       version:
-        description: "Version tag to build (e.g. v0.1.0)"
+        description: "Version number, e.g. 0.1.0"
         required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.inputs.version || github.sha }}
+
 jobs:
-  windows:
-    runs-on: windows-latest
-    env:
-      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+      commit: ${{ steps.plan.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ github.event.inputs.commit || github.sha }}
+      - id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-$(node -p "require('./package.json').version")}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$version already exists — nothing to build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
 
       - uses: actions/setup-node@v4
         with:
@@ -38,15 +74,15 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      # The installer and the app show the version of the tag (older commits all said 0.1.0).
-      - name: Set app version from tag
+      # The installer and the app show this version (older commits all said 0.1.0).
+      - name: Set app version
         shell: bash
         run: |
           node -e "
             const fs = require('fs');
             const f = 'src-tauri/tauri.conf.json';
             const c = JSON.parse(fs.readFileSync(f, 'utf8'));
-            c.version = process.env.TAG.replace(/^v/, '');
+            c.version = process.env.VERSION;
             fs.writeFileSync(f, JSON.stringify(c, null, 2));
           "
 
@@ -56,10 +92,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ env.TAG }}
-          releaseName: AccountBook ${{ env.TAG }}
+          tagName: v${{ env.VERSION }}
+          releaseName: AccountBook v${{ env.VERSION }}
+          releaseCommitish: ${{ needs.plan.outputs.commit }}
           releaseBody: |
-            Version de test **${{ env.TAG }}** — voir CHANGELOG.md pour le détail des nouveautés.
+            Version de test **v${{ env.VERSION }}** — voir CHANGELOG.md pour le détail des nouveautés.
 
             Installation sur Windows : téléchargez `AccountBook_…_x64-setup.exe` (ou le `.msi`) ci-dessous et lancez-le.
             Windows peut afficher « Windows a protégé votre ordinateur » (application non signée) : cliquez sur

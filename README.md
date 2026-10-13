@@ -71,7 +71,7 @@ Each delivery is a numbered version (see [CHANGELOG.md](CHANGELOG.md)). To test 
 2. Under **AccountBook v0.x.0**, download `AccountBook_…_x64-setup.exe` (or the `.msi`).
 3. Install it. Windows may warn that the app is not signed: click **More info → Run anyway**.
 
-Your data is kept between versions. To build an installer for a version, push its tag (for example `git tag v0.5.0 && git push origin v0.5.0`). To build an older tag, use **Actions → Build installers → Run workflow**.
+Your data is kept between versions. A new version is published automatically when its version number is raised in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`: GitHub builds the installers and creates the release. To build an older version, use **Actions → Build installers → Run workflow** with the commit listed in the CHANGELOG.
 
 ## Run it
 
