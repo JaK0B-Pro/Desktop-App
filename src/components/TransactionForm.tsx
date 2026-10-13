@@ -8,7 +8,7 @@ import { AmountInput } from "./AmountInput";
 import { LabelInput } from "./LabelInput";
 import { kindLabel, STATUSES, statusLabel, TX_KINDS } from "./labels";
 import { Field, Modal } from "./Modal";
-import { ChantierSelect, PartySelect } from "./QuickSelect";
+import { AccountSelect, ChantierSelect, PartySelect } from "./QuickSelect";
 import { TxHistory } from "./TxHistory";
 
 interface Line {
@@ -76,6 +76,14 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
       .then(setNextCheque)
       .catch(() => setNextCheque(null));
   }, [chequeAccount, showCheque]);
+
+  // A transfer never goes to its own source: move the first destination to another account.
+  useEffect(() => {
+    if (kind !== "transfer" || fromAccountId == null || lines[0]?.accountId !== fromAccountId) return;
+    const other = active.find((a) => a.id !== fromAccountId && !lines.some((l) => l.accountId === a.id));
+    setLines((ls) => ls.map((l, i) => (i === 0 ? { ...l, accountId: other?.id ?? null } : l)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, fromAccountId]);
 
   function updateLine(key: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -170,8 +178,47 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
     );
   }
 
+  // Transfers get an automatic label ("Virement Caisse → Banque BNA") when none is typed.
+  const accountName = (id: number | null | undefined) => accounts.find((a) => a.id === id)?.name ?? "?";
+  const autoLabel =
+    kind === "transfer" && fromAccountId != null && lines[0]?.accountId != null
+      ? t("tr.autoLabel", {
+          from: accountName(fromAccountId),
+          to: lines.map((l) => accountName(l.accountId)).join(", "),
+        })
+      : "";
+  const effectiveLabel = label.trim() || autoLabel;
+
+  /** Balance of each account touched by the transfer: now, movement, after (edits ignore the old version). */
+  const transferPreview = useMemo(() => {
+    if (kind !== "transfer") return [];
+    const delta = new Map<number, number>();
+    const add = (id: number | null | undefined, v: number) => id != null && delta.set(id, (delta.get(id) ?? 0) + v);
+    add(fromAccountId, -linesTotal);
+    for (const l of lines) add(l.accountId, l.amount ?? 0);
+    // When editing, the current balances already include the original entry: remove it first.
+    const original = new Map<number, number>();
+    if (isEdit && initial.kind === "transfer") {
+      const tot = (initial.lines ?? []).reduce((s, l) => s + l.amount, 0);
+      if (initial.fromAccountId != null) original.set(initial.fromAccountId, -tot);
+      for (const l of initial.lines ?? []) original.set(l.accountId, (original.get(l.accountId) ?? 0) + l.amount);
+    }
+    return [...delta.entries()].map(([id, change]) => {
+      const now = (accounts.find((a) => a.id === id)?.balance ?? 0) - (original.get(id) ?? 0);
+      return { id, name: accountName(id), now, change, after: now + change };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, fromAccountId, lines, linesTotal, accounts, isEdit]);
+
+  function swapTransfer() {
+    const to = lines[0]?.accountId ?? null;
+    if (lines.length !== 1) return;
+    setLines([{ ...lines[0], accountId: fromAccountId }]);
+    setFromAccountId(to);
+  }
+
   function validate(): string | null {
-    if (!label.trim()) return t("form.err.label");
+    if (!effectiveLabel) return t("form.err.label");
     if (usesLines(kind)) {
       if (kind === "transfer" && fromAccountId == null) return t("form.err.from");
       if (lines.some((l) => l.accountId == null)) return t("form.err.account");
@@ -191,7 +238,7 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
       id: initial.id ?? null,
       date,
       kind,
-      label,
+      label: effectiveLabel,
       partyId: kind === "transfer" ? null : partyId,
       chantierId: kind === "transfer" ? null : chantierId,
       family: family.trim() || null,
@@ -255,15 +302,6 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
       },
     );
   }
-
-  const accountOptions = (selected: number | null) =>
-    accounts
-      .filter((a) => !a.archived || a.id === selected)
-      .map((a) => (
-        <option key={a.id} value={a.id}>
-          {a.name}
-        </option>
-      ));
 
   const chantierOptions = (selected: number | null) =>
     chantiers
@@ -342,6 +380,7 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
 
           <Field label={t("form.label")}>
             <LabelInput
+              placeholder={autoLabel || undefined}
               value={label}
               onChange={setLabel}
               onPick={onPick}
@@ -367,16 +406,20 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
           {usesLines(kind) ? (
             <div className="lines">
               {kind === "transfer" && (
-                <Field label={t("form.fromAccount")}>
-                  <select
-                    className="input"
-                    value={fromAccountId ?? ""}
-                    onChange={(e) => setFromAccountId(e.target.value ? Number(e.target.value) : null)}
+                <div className="transfer-from">
+                  <Field label={t("form.fromAccount")}>
+                    <AccountSelect value={fromAccountId} onChange={setFromAccountId} />
+                  </Field>
+                  <button
+                    type="button"
+                    className="btn swap"
+                    title={t("tr.swap")}
+                    disabled={lines.length !== 1}
+                    onClick={swapTransfer}
                   >
-                    <option value="">{t("c.choose")}</option>
-                    {accountOptions(fromAccountId)}
-                  </select>
-                </Field>
+                    ⇅ {t("tr.swap")}
+                  </button>
+                </div>
               )}
               <div className="lines-head">
                 <span className="field-label">{t(`form.lines.${kind as "income" | "expense" | "transfer"}`)}</span>
@@ -403,18 +446,11 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
               </div>
               {lines.map((l, i) => (
                 <div className={`line ${kind === "transfer" ? "no-chantier" : ""}`} key={l.key}>
-                  <select
-                    className="input"
-                    value={l.accountId ?? ""}
-                    onChange={(e) =>
-                      updateLine(l.key, {
-                        accountId: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
-                  >
-                    <option value="">{t("c.choose")}</option>
-                    {accountOptions(l.accountId)}
-                  </select>
+                  <AccountSelect
+                    value={l.accountId}
+                    exclude={kind === "transfer" ? fromAccountId : null}
+                    onChange={(id) => updateLine(l.key, { accountId: id })}
+                  />
                   {kind !== "transfer" && (
                     <select
                       className={`input ${l.chantierId == null ? "muted-select" : ""}`}
@@ -475,6 +511,38 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
             <Field label={t("form.amount")}>
               <AmountInput value={amount} onChange={setAmount} />
             </Field>
+          )}
+
+          {kind === "transfer" && linesTotal > 0 && transferPreview.length > 0 && (
+            <div className="transfer-preview">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t("tr.preview")}</th>
+                    <th className="num">{t("tr.now")}</th>
+                    <th className="num">{t("tr.change")}</th>
+                    <th className="num">{t("tr.after")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transferPreview.map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.name}</td>
+                      <td className="num">{fmt(p.now)}</td>
+                      <td className={`num ${p.change < 0 ? "neg" : "pos"}`}>{fmt(p.change, { sign: true })}</td>
+                      <td className={`num strong ${p.after < 0 ? "neg" : ""}`}>{fmt(p.after)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {transferPreview
+                .filter((p) => p.after < 0 && p.change < 0)
+                .map((p) => (
+                  <div key={p.id} className="warn small">
+                    ⚠ {t("tr.negative", { name: p.name })}
+                  </div>
+                ))}
+            </div>
           )}
 
           {showCheque && (

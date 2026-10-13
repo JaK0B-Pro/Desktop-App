@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useAppVersion } from "./version";
 import { useApp, type JournalKind, type Page } from "./context";
 import type { TKey } from "./i18n";
 import { TopBar } from "./components/TopBar";
@@ -49,6 +50,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [openTx, route, canEdit]);
 
+  const version = useAppVersion();
   const total = accounts.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
   const isOn = (n: NavItem) => route.page === n.page && (n.page !== "journal" || route.journal === n.journal);
 
@@ -61,6 +63,7 @@ export function App() {
           <div>
             <strong>AccountBook</strong>
             <small>{fmt(total)}</small>
+            {version && <small className="version">{t("app.version", { v: version })}</small>}
           </div>
         </div>
         {canEdit && (

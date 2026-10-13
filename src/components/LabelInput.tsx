@@ -13,6 +13,7 @@ interface Props {
   partyId: number | null;
   chantierId: number | null;
   autoFocus?: boolean;
+  placeholder?: string;
 }
 
 /**
@@ -22,7 +23,7 @@ interface Props {
  *
  * Keys: ↑/↓ to move, Enter to pick, Tab or → to accept the grey inline completion, Esc to close.
  */
-export function LabelInput({ value, onChange, onPick, kind, partyId, chantierId, autoFocus }: Props) {
+export function LabelInput({ value, onChange, onPick, kind, partyId, chantierId, autoFocus, placeholder }: Props) {
   const { fmt, parties, chantiers, t } = useApp();
   const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -96,7 +97,7 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, chantierId,
           className="input"
           value={value}
           autoFocus={autoFocus}
-          placeholder={t("form.labelPh")}
+          placeholder={placeholder ?? t("form.labelPh")}
           onChange={(e) => {
             onChange(e.target.value);
             setOpen(true);

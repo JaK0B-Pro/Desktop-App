@@ -76,6 +76,7 @@ export function TxGrid({
   emptyText,
   headerExtra,
   footerExtra,
+  variant,
 }: {
   rows: Transaction[];
   /** Amount shown for a row (defaults to the effect in statements, or the total). */
@@ -90,6 +91,8 @@ export function TxGrid({
   /** Extra content in a column header (filter buttons). */
   headerExtra?: (key: SortKey | "type") => ReactNode;
   footerExtra?: ReactNode;
+  /** Extra class on the table (column layout variants). */
+  variant?: string;
 }) {
   const { fmt, openTx, notifyDeleted, toast, fail, confirm, t, canEdit, isClosed } = useApp();
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean } | null>(null);
@@ -240,7 +243,7 @@ export function TxGrid({
   return (
     <div className="grid-wrap" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="grid-scroll" ref={scrollRef}>
-        <table className="table grid fixed">
+        <table className={`table grid fixed ${variant ?? ""}`}>
           <thead ref={headRef}>
             <tr>
               <th className="icon-col" />

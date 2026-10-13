@@ -441,6 +441,16 @@ const fr = {
   "set.adminOnly": "Seul un administrateur peut modifier ces paramètres.",
   "set.companyAddress": "Adresse / ville",
   "set.myAccount": "Mon compte",
+  "form.newAccount": "+ Nouveau compte…",
+  "tr.swap": "Inverser",
+  "tr.preview": "Soldes",
+  "tr.now": "Avant",
+  "tr.change": "Mouvement",
+  "tr.after": "Après",
+  "tr.negative": "{name} sera négatif après ce virement",
+  "tr.autoLabel": "Virement {from} → {to}",
+  "tr.quick": "Virement",
+  "app.version": "Version {v}",
 } as const;
 
 export type TKey = keyof typeof fr;
@@ -867,6 +877,16 @@ const en: Record<TKey, string> = {
   "set.adminOnly": "Only an administrator can change these settings.",
   "set.companyAddress": "Address / city",
   "set.myAccount": "My account",
+  "form.newAccount": "+ New account…",
+  "tr.swap": "Swap",
+  "tr.preview": "Balances",
+  "tr.now": "Before",
+  "tr.change": "Movement",
+  "tr.after": "After",
+  "tr.negative": "{name} will be negative after this transfer",
+  "tr.autoLabel": "Transfer {from} → {to}",
+  "tr.quick": "Transfer",
+  "app.version": "Version {v}",
 };
 
 export type Lang = "fr" | "en";

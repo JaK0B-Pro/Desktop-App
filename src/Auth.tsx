@@ -4,6 +4,12 @@ import { App } from "./App";
 import { AppProvider } from "./context";
 import { makeT, translateError, type Lang } from "./i18n";
 import type { Exercise, Settings, User } from "./types";
+import { useAppVersion } from "./version";
+
+function AuthVersion() {
+  const v = useAppVersion();
+  return v ? <div className="muted small center-text">AccountBook {v}</div> : null;
+}
 
 type Step =
   | { kind: "loading" }
@@ -83,6 +89,7 @@ export function AuthGate() {
             }}
           />
         )}
+        <AuthVersion />
         <div className="auth-lang">
           {(["fr", "en"] as Lang[]).map((l) => (
             <button key={l} className={l === lang ? "on" : ""} onClick={() => setLang(l)}>

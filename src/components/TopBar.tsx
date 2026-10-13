@@ -28,6 +28,7 @@ export function TopBar() {
     route,
     user,
     logout,
+    openTx,
   } = useApp();
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -113,6 +114,11 @@ export function TopBar() {
       </div>
 
       <div className="top-actions">
+        {canEdit && (
+          <button className="btn small" disabled={current?.closed} onClick={() => openTx({ kind: "transfer" })}>
+            ⇄ {t("tr.quick")}
+          </button>
+        )}
         <button className={`btn small ${route.page === "etat" ? "primary" : ""}`} onClick={() => navigate({ page: "etat" })}>
           ⚖ {t("nav.etat")}
         </button>

@@ -404,6 +404,7 @@ export function Journal({ kind }: { kind: JournalKind }) {
           selectedId={selected}
           onSelect={setSelected}
           headerExtra={headerExtra}
+          variant={kind === "transfer" ? "transfers" : undefined}
           footerExtra={
             loadMs != null && (
               <span className="muted small load-time">

@@ -63,6 +63,16 @@ The app uses **SQLite**, a database engine built into the app, not a separate se
 
 PostgreSQL only becomes worthwhile if **several PCs must share the same data over a network**. The data layer is isolated in `ledger.rs` and `admin.rs`, so that would be a contained change.
 
+## Versions and testing
+
+Each delivery is a numbered version (see [CHANGELOG.md](CHANGELOG.md)). To test a version on Windows:
+
+1. Open the repository on GitHub, then **Releases**.
+2. Under **AccountBook v0.x.0**, download `AccountBook_…_x64-setup.exe` (or the `.msi`).
+3. Install it. Windows may warn that the app is not signed: click **More info → Run anyway**.
+
+Your data is kept between versions. To build an installer for a version, push its tag (for example `git tag v0.5.0 && git push origin v0.5.0`). To build an older tag, use **Actions → Build installers → Run workflow**.
+
 ## Run it
 
 Prerequisites: [Rust](https://rustup.rs), Node.js 20+, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). On Windows 10/11 you only need the Microsoft C++ Build Tools, because WebView2 is already installed.
