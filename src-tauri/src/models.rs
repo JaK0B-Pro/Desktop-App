@@ -154,7 +154,9 @@ pub struct TxInput {
 pub struct LineView {
     pub account_id: i64,
     pub account_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chantier_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chantier_name: Option<String>,
     /// Signed: positive = money into the account.
     pub amount: i64,
@@ -167,23 +169,36 @@ pub struct Transaction {
     pub date: String,
     pub kind: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub party_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub party_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chantier_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chantier_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub family: Option<String>,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cheque_no: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cheque_crossed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cheque_payee: Option<String>,
     /// Total, always positive.
     pub amount: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     pub lines: Vec<LineView>,
+    /// Not sent to the UI (keeps large lists light).
+    #[serde(default, skip_serializing)]
     pub created_at: String,
     /// Signed effect on the statement subject (account or party), when listing a statement.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub effect: Option<i64>,
     /// Balance after this transaction, when listing a statement.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub running_balance: Option<i64>,
 }
 
@@ -199,6 +214,8 @@ pub struct TxFilter {
     pub family: Option<String>,
     pub status: Option<String>,
     pub search: Option<String>,
+    pub min_amount: Option<i64>,
+    pub max_amount: Option<i64>,
     pub limit: Option<i64>,
 }
 
@@ -277,4 +294,108 @@ pub struct Report {
     pub by_family: Vec<LabelTotal>,
     pub by_chantier: Vec<Chantier>,
     pub monthly: Vec<MonthPoint>,
+}
+
+// ---------------------------------------------------------------------------
+// Users, fiscal years, history, account states
+// ---------------------------------------------------------------------------
+
+/// `admin` (everything), `user` (data entry), `viewer` (read only).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub full_name: Option<String>,
+    pub role: String,
+    pub active: bool,
+    pub created_at: String,
+    pub last_login: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInput {
+    pub id: Option<i64>,
+    pub username: String,
+    pub full_name: Option<String>,
+    pub role: String,
+    #[serde(default = "yes")]
+    pub active: bool,
+    /// Required for a new user; when editing, `None` keeps the current password.
+    pub password: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStatus {
+    /// No user exists yet: the first screen creates the administrator.
+    pub needs_setup: bool,
+    pub user: Option<User>,
+    /// Problem found by the startup database check, if any.
+    pub db_warning: Option<String>,
+}
+
+/// A fiscal year ("exercice"), from 1 January to 31 December.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Exercise {
+    pub year: i32,
+    pub closed: bool,
+    pub closed_at: Option<String>,
+    pub closed_by: Option<String>,
+    pub count: i64,
+    pub income: i64,
+    pub expense: i64,
+}
+
+/// One entry of the change history.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    pub id: i64,
+    pub at: String,
+    pub username: Option<String>,
+    /// `create` | `update` | `delete` | `restore` | `close` | `reopen` | `login`
+    pub action: String,
+    /// `transaction` | `exercise` | `user`
+    pub entity: String,
+    pub entity_id: Option<i64>,
+    pub summary: String,
+    /// The transaction before the change (JSON), for updates and deletions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<Transaction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<Transaction>,
+    /// The transaction still exists (can be opened).
+    pub exists: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditFilter {
+    pub entity_id: Option<i64>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<i64>,
+}
+
+/// One line of the "état des comptes": opening balance, money in, money out and balance over a period.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceRow {
+    pub id: i64,
+    pub name: String,
+    pub kind: String,
+    /// Balance on the first day of the period.
+    pub initial: i64,
+    /// For accounts: money in. For beneficiaries: what increased their debt (you paid them, sales).
+    pub debit: i64,
+    /// For accounts: money out. For beneficiaries: what reduced it (they paid you, purchases).
+    pub credit: i64,
+    pub balance: i64,
 }

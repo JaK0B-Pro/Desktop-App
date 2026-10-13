@@ -9,6 +9,7 @@ import { LabelInput } from "./LabelInput";
 import { kindLabel, STATUSES, statusLabel, TX_KINDS } from "./labels";
 import { Field, Modal } from "./Modal";
 import { ChantierSelect, PartySelect } from "./QuickSelect";
+import { TxHistory } from "./TxHistory";
 
 interface Line {
   key: number;
@@ -29,7 +30,8 @@ const newLine = (accountId: number | null = null, amount: number | null = null, 
 const usesLines = (k: TxKind) => k === "income" || k === "expense" || k === "transfer";
 
 export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput>; onClose: () => void }) {
-  const { accounts, parties, chantiers, families, refresh, toast, fail, fmt, t, lang, settings, money } = useApp();
+  const { accounts, parties, chantiers, families, notifySaved, toast, fail, fmt, t, lang, settings, money, canEdit, isClosed } =
+    useApp();
   const active = accounts.filter((a) => !a.archived);
   const defaultAccount = active[0]?.id ?? null;
 
@@ -41,7 +43,7 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
   const [family, setFamily] = useState(initial.family ?? "");
   const [status, setStatus] = useState<TxStatus>(initial.status ?? "ok");
   const [chequeNo, setChequeNo] = useState(initial.chequeNo ?? "");
-  const [chequeCrossed, setChequeCrossed] = useState(initial.chequeCrossed ?? true);
+  const [chequeCrossed, setChequeCrossed] = useState(initial.chequeCrossed ?? initial.id == null);
   const [chequePayee, setChequePayee] = useState(initial.chequePayee ?? "");
   const [fromAccountId, setFromAccountId] = useState<number | null>(initial.fromAccountId ?? defaultAccount);
   const [amount, setAmount] = useState<number | null>(initial.amount ?? null);
@@ -57,17 +59,22 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
   const [nextCheque, setNextCheque] = useState<string | null>(null);
 
   const isEdit = initial.id != null;
+  // Entries of a closed fiscal year, and everything for read-only users, open in view mode.
+  const readOnly = !canEdit || isClosed(initial.date ?? date) || (isEdit && isClosed(date));
   const linesTotal = useMemo(() => lines.reduce((s, l) => s + (l.amount ?? 0), 0), [lines]);
-  const total = usesLines(kind) ? linesTotal : amount ?? 0;
+  const total = usesLines(kind) ? linesTotal : (amount ?? 0);
   const remaining = splitTotal != null ? splitTotal - linesTotal : null;
-  const chequeAccount = kind === "transfer" ? fromAccountId : lines[0]?.accountId ?? null;
+  const chequeAccount = kind === "transfer" ? fromAccountId : (lines[0]?.accountId ?? null);
   const showCheque = kind !== "purchase" && kind !== "sale";
   const partyName = parties.find((p) => p.id === partyId)?.name ?? "";
 
   // Smart: suggest the next cheque number of the paying account.
   useEffect(() => {
     if (!showCheque || chequeAccount == null) return setNextCheque(null);
-    api.nextChequeNo(chequeAccount).then(setNextCheque).catch(() => setNextCheque(null));
+    api
+      .nextChequeNo(chequeAccount)
+      .then(setNextCheque)
+      .catch(() => setNextCheque(null));
   }, [chequeAccount, showCheque]);
 
   function updateLine(key: number, patch: Partial<Line>) {
@@ -114,11 +121,21 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
       setKind(k);
       filled.push(t("form.f.type"));
     }
-    if (partyId == null && s.lastPartyId != null && k !== "transfer" && parties.some((p) => p.id === s.lastPartyId && !p.archived)) {
+    if (
+      partyId == null &&
+      s.lastPartyId != null &&
+      k !== "transfer" &&
+      parties.some((p) => p.id === s.lastPartyId && !p.archived)
+    ) {
       setPartyId(s.lastPartyId);
       filled.push(t("form.f.party"));
     }
-    if (chantierId == null && s.lastChantierId != null && k !== "transfer" && chantiers.some((c) => c.id === s.lastChantierId && !c.archived)) {
+    if (
+      chantierId == null &&
+      s.lastChantierId != null &&
+      k !== "transfer" &&
+      chantiers.some((c) => c.id === s.lastChantierId && !c.archived)
+    ) {
       setChantierId(s.lastChantierId);
       filled.push(t("form.f.chantier"));
     }
@@ -142,7 +159,15 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
         filled.push(t("form.f.amount"));
       }
     }
-    setAutoFilled(filled.length ? t("form.autofill", { label: s.label, n: s.uses, fields: filled.join(", ") }) : null);
+    setAutoFilled(
+      filled.length
+        ? t("form.autofill", {
+            label: s.label,
+            n: s.uses,
+            fields: filled.join(", "),
+          })
+        : null,
+    );
   }
 
   function validate(): string | null {
@@ -177,15 +202,26 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
       fromAccountId: kind === "transfer" ? fromAccountId : null,
       amount: usesLines(kind) ? null : amount,
       lines: usesLines(kind)
-        ? lines.map((l) => ({ accountId: l.accountId!, amount: l.amount ?? 0, chantierId: kind === "transfer" ? null : l.chantierId }))
+        ? lines.map((l) => ({
+            accountId: l.accountId!,
+            amount: l.amount ?? 0,
+            chantierId: kind === "transfer" ? null : l.chantierId,
+          }))
         : [],
       notes,
     };
     setSaving(true);
     try {
       const saved = await api.saveTransaction(input);
-      toast(isEdit ? t("form.updated") : t("form.savedMsg", { kind: kindLabel(t, kind), amount: fmt(total) }));
-      await refresh();
+      toast(
+        isEdit
+          ? t("form.updated")
+          : t("form.savedMsg", {
+              kind: kindLabel(t, kind),
+              amount: fmt(total),
+            }),
+      );
+      await notifySaved(saved);
       if (after === "print") printVoucher({ t, lang, settings, decimals: money.decimals, fmt }, saved);
       if (after === "new") {
         setLabel("");
@@ -211,7 +247,12 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
     if (!total) return fail(t("form.err.amount"));
     printCheque(
       { t, lang, settings, decimals: money.decimals, fmt },
-      { amount: total, payee: chequePayee.trim() || partyName, date, crossed: chequeCrossed },
+      {
+        amount: total,
+        payee: chequePayee.trim() || partyName,
+        date,
+        crossed: chequeCrossed,
+      },
     );
   }
 
@@ -233,256 +274,277 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
         </option>
       ));
 
-  const title = isEdit ? t("form.edit", { kind: kindLabel(t, kind).toLowerCase() }) : t("form.new");
+  const title =
+    (isEdit ? t("form.edit", { kind: kindLabel(t, kind).toLowerCase() }) : t("form.new")) + (isEdit ? ` — N° ${initial.id}` : "");
 
   return (
     <Modal title={title} onClose={onClose} wide>
+      {readOnly && (
+        <div className="locked-note">
+          🔒 {canEdit ? t("ex.locked", { year: (initial.date ?? date).slice(0, 4) }) : t("err.forbidden")}
+        </div>
+      )}
       <form
-        className="tx-form"
+        className={`tx-form ${readOnly ? "read-only" : ""}`}
         onSubmit={(e) => {
           e.preventDefault();
-          void save("close");
+          if (!readOnly) void save("close");
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !readOnly) {
             e.preventDefault();
             void save("close");
           }
         }}
       >
-        <div className="kind-tabs">
-          {TX_KINDS.map((k) => (
-            <button type="button" key={k} className={`kind-tab k-${k} ${k === kind ? "on" : ""}`} onClick={() => setKind(k)}>
-              {kindLabel(t, k)}
-            </button>
-          ))}
-        </div>
-        <p className="muted small">{t(`help.${kind}`)}</p>
-
-        <div className="form-grid three">
-          <Field label={t("form.date")}>
-            <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-          {kind !== "transfer" ? (
-            <Field label={t("form.family")}>
-              <input
-                className="input"
-                list="families"
-                value={family}
-                placeholder={t("form.familyPh")}
-                onChange={(e) => setFamily(e.target.value)}
-              />
-              <datalist id="families">
-                {families.map((f) => (
-                  <option key={f.name} value={f.name} />
-                ))}
-              </datalist>
-            </Field>
-          ) : (
-            <span />
-          )}
-          <Field label={t("form.status")}>
-            <select className="input" value={status} onChange={(e) => setStatus(e.target.value as TxStatus)}>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {statusLabel(t, s)}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-
-        <Field label={t("form.label")}>
-          <LabelInput
-            value={label}
-            onChange={setLabel}
-            onPick={onPick}
-            kind={kind}
-            partyId={partyId}
-            chantierId={chantierId}
-            autoFocus
-          />
-        </Field>
-        {autoFilled && <div className="smart-note">✨ {autoFilled}</div>}
-
-        {kind !== "transfer" && (
-          <div className="form-grid">
-            <Field label={t("form.chantier")}>
-              <ChantierSelect value={chantierId} onChange={setChantierId} />
-            </Field>
-            <Field label={kind === "income" ? t("form.partyIncome") : t("form.party")}>
-              <PartySelect value={partyId} onChange={setPartyId} />
-            </Field>
-          </div>
-        )}
-
-        {usesLines(kind) ? (
-          <div className="lines">
-            {kind === "transfer" && (
-              <Field label={t("form.fromAccount")}>
-                <select
-                  className="input"
-                  value={fromAccountId ?? ""}
-                  onChange={(e) => setFromAccountId(e.target.value ? Number(e.target.value) : null)}
-                >
-                  <option value="">{t("c.choose")}</option>
-                  {accountOptions(fromAccountId)}
-                </select>
-              </Field>
-            )}
-            <div className="lines-head">
-              <span className="field-label">{t(`form.lines.${kind as "income" | "expense" | "transfer"}`)}</span>
-              {lines.length > 1 && (
-                <div className="split-tools">
-                  <span className="muted small">{t("form.splitTotal")}</span>
-                  <div className="split-total">
-                    <AmountInput value={splitTotal} onChange={setSplitTotal} placeholder={t("form.optional")} />
-                  </div>
-                  <button type="button" className="btn small ghost" onClick={splitEqually}>
-                    {t("form.splitEqually")}
-                  </button>
-                  <button type="button" className="btn small ghost" onClick={sameForAll}>
-                    {t("form.sameEach")}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className={`line line-head ${kind === "transfer" ? "no-chantier" : ""}`}>
-              <span>{t("form.account")}</span>
-              {kind !== "transfer" && <span>{t("form.chantier")}</span>}
-              <span className="num">{t("form.amount")}</span>
-              <span />
-            </div>
-            {lines.map((l, i) => (
-              <div className={`line ${kind === "transfer" ? "no-chantier" : ""}`} key={l.key}>
-                <select
-                  className="input"
-                  value={l.accountId ?? ""}
-                  onChange={(e) => updateLine(l.key, { accountId: e.target.value ? Number(e.target.value) : null })}
-                >
-                  <option value="">{t("c.choose")}</option>
-                  {accountOptions(l.accountId)}
-                </select>
-                {kind !== "transfer" && (
-                  <select
-                    className={`input ${l.chantierId == null ? "muted-select" : ""}`}
-                    value={l.chantierId ?? ""}
-                    onChange={(e) => updateLine(l.key, { chantierId: e.target.value ? Number(e.target.value) : null })}
-                  >
-                    <option value="">
-                      {t("form.sameChantier")}
-                      {chantierId != null ? ` (${chantiers.find((c) => c.id === chantierId)?.name ?? ""})` : ""}
-                    </option>
-                    {chantierOptions(l.chantierId)}
-                  </select>
-                )}
-                <AmountInput
-                  value={l.amount}
-                  onChange={(v) => updateLine(l.key, { amount: v })}
-                  autoFocus={i > 0 && l.amount == null}
-                />
-                <div className="line-actions">
-                  {remaining != null && remaining !== 0 && (
-                    <button type="button" className="btn small ghost" onClick={() => fillRemaining(l.key)}>
-                      {t("form.rest")}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label={t("c.delete")}
-                    disabled={lines.length === 1}
-                    onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
+        <fieldset className="plain" disabled={readOnly}>
+          <div className="kind-tabs">
+            {TX_KINDS.map((k) => (
+              <button type="button" key={k} className={`kind-tab k-${k} ${k === kind ? "on" : ""}`} onClick={() => setKind(k)}>
+                {kindLabel(t, k)}
+              </button>
             ))}
-            <div className="lines-foot">
-              <button type="button" className="btn small" onClick={addLine}>
-                {t("form.addLine")}
-              </button>
-              <div className="lines-total">
-                {remaining != null && remaining !== 0 && (
-                  <span className={remaining > 0 ? "warn" : "neg"}>
-                    {remaining > 0 ? t("form.left", { v: fmt(remaining) }) : t("form.over", { v: fmt(-remaining) })}
-                  </span>
+          </div>
+          <p className="muted small">{t(`help.${kind}`)}</p>
+
+          <div className="form-grid three">
+            <Field label={t("form.date")}>
+              <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </Field>
+            {kind !== "transfer" ? (
+              <Field label={t("form.family")}>
+                <input
+                  className="input"
+                  list="families"
+                  value={family}
+                  placeholder={t("form.familyPh")}
+                  onChange={(e) => setFamily(e.target.value)}
+                />
+                <datalist id="families">
+                  {families.map((f) => (
+                    <option key={f.name} value={f.name} />
+                  ))}
+                </datalist>
+              </Field>
+            ) : (
+              <span />
+            )}
+            <Field label={t("form.status")}>
+              <select className="input" value={status} onChange={(e) => setStatus(e.target.value as TxStatus)}>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {statusLabel(t, s)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          <Field label={t("form.label")}>
+            <LabelInput
+              value={label}
+              onChange={setLabel}
+              onPick={onPick}
+              kind={kind}
+              partyId={partyId}
+              chantierId={chantierId}
+              autoFocus={!readOnly}
+            />
+          </Field>
+          {autoFilled && <div className="smart-note">✨ {autoFilled}</div>}
+
+          {kind !== "transfer" && (
+            <div className="form-grid">
+              <Field label={t("form.chantier")}>
+                <ChantierSelect value={chantierId} onChange={setChantierId} />
+              </Field>
+              <Field label={kind === "income" ? t("form.partyIncome") : t("form.party")}>
+                <PartySelect value={partyId} onChange={setPartyId} />
+              </Field>
+            </div>
+          )}
+
+          {usesLines(kind) ? (
+            <div className="lines">
+              {kind === "transfer" && (
+                <Field label={t("form.fromAccount")}>
+                  <select
+                    className="input"
+                    value={fromAccountId ?? ""}
+                    onChange={(e) => setFromAccountId(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">{t("c.choose")}</option>
+                    {accountOptions(fromAccountId)}
+                  </select>
+                </Field>
+              )}
+              <div className="lines-head">
+                <span className="field-label">{t(`form.lines.${kind as "income" | "expense" | "transfer"}`)}</span>
+                {lines.length > 1 && (
+                  <div className="split-tools">
+                    <span className="muted small">{t("form.splitTotal")}</span>
+                    <div className="split-total">
+                      <AmountInput value={splitTotal} onChange={setSplitTotal} placeholder={t("form.optional")} />
+                    </div>
+                    <button type="button" className="btn small ghost" onClick={splitEqually}>
+                      {t("form.splitEqually")}
+                    </button>
+                    <button type="button" className="btn small ghost" onClick={sameForAll}>
+                      {t("form.sameEach")}
+                    </button>
+                  </div>
                 )}
-                <span>
-                  {t("c.total")} <strong>{fmt(linesTotal)}</strong>
-                </span>
+              </div>
+              <div className={`line line-head ${kind === "transfer" ? "no-chantier" : ""}`}>
+                <span>{t("form.account")}</span>
+                {kind !== "transfer" && <span>{t("form.chantier")}</span>}
+                <span className="num">{t("form.amount")}</span>
+                <span />
+              </div>
+              {lines.map((l, i) => (
+                <div className={`line ${kind === "transfer" ? "no-chantier" : ""}`} key={l.key}>
+                  <select
+                    className="input"
+                    value={l.accountId ?? ""}
+                    onChange={(e) =>
+                      updateLine(l.key, {
+                        accountId: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                  >
+                    <option value="">{t("c.choose")}</option>
+                    {accountOptions(l.accountId)}
+                  </select>
+                  {kind !== "transfer" && (
+                    <select
+                      className={`input ${l.chantierId == null ? "muted-select" : ""}`}
+                      value={l.chantierId ?? ""}
+                      onChange={(e) =>
+                        updateLine(l.key, {
+                          chantierId: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                    >
+                      <option value="">
+                        {t("form.sameChantier")}
+                        {chantierId != null ? ` (${chantiers.find((c) => c.id === chantierId)?.name ?? ""})` : ""}
+                      </option>
+                      {chantierOptions(l.chantierId)}
+                    </select>
+                  )}
+                  <AmountInput
+                    value={l.amount}
+                    onChange={(v) => updateLine(l.key, { amount: v })}
+                    autoFocus={i > 0 && l.amount == null}
+                  />
+                  <div className="line-actions">
+                    {remaining != null && remaining !== 0 && (
+                      <button type="button" className="btn small ghost" onClick={() => fillRemaining(l.key)}>
+                        {t("form.rest")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label={t("c.delete")}
+                      disabled={lines.length === 1}
+                      onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <div className="lines-foot">
+                <button type="button" className="btn small" onClick={addLine}>
+                  {t("form.addLine")}
+                </button>
+                <div className="lines-total">
+                  {remaining != null && remaining !== 0 && (
+                    <span className={remaining > 0 ? "warn" : "neg"}>
+                      {remaining > 0 ? t("form.left", { v: fmt(remaining) }) : t("form.over", { v: fmt(-remaining) })}
+                    </span>
+                  )}
+                  <span>
+                    {t("c.total")} <strong>{fmt(linesTotal)}</strong>
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <Field label={t("form.amount")}>
-            <AmountInput value={amount} onChange={setAmount} />
+          ) : (
+            <Field label={t("form.amount")}>
+              <AmountInput value={amount} onChange={setAmount} />
+            </Field>
+          )}
+
+          {showCheque && (
+            <fieldset className="cheque">
+              <div className="cheque-grid">
+                <Field
+                  label={t("form.chequeNo")}
+                  hint={
+                    nextCheque && !chequeNo ? (
+                      <button type="button" className="link small" onClick={() => setChequeNo(nextCheque)}>
+                        {t("form.nextCheque")} : {nextCheque}
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  <input
+                    className="input"
+                    value={chequeNo}
+                    placeholder={nextCheque ?? ""}
+                    onChange={(e) => setChequeNo(e.target.value)}
+                  />
+                </Field>
+                <Field label={t("form.payee")}>
+                  <input
+                    className="input"
+                    value={chequePayee}
+                    placeholder={partyName}
+                    onChange={(e) => setChequePayee(e.target.value)}
+                  />
+                </Field>
+                <label className="check cheque-crossed">
+                  <input type="checkbox" checked={chequeCrossed} onChange={(e) => setChequeCrossed(e.target.checked)} />{" "}
+                  {t("form.chequeCrossed")}
+                </label>
+                <button type="button" className="btn" onClick={doPrintCheque}>
+                  🖨 {t("form.printCheque")}
+                </button>
+              </div>
+            </fieldset>
+          )}
+
+          <Field label={t("c.notes")}>
+            <textarea className="input" rows={1} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
-        )}
-
-        {showCheque && (
-          <fieldset className="cheque">
-            <div className="cheque-grid">
-              <Field
-                label={t("form.chequeNo")}
-                hint={
-                  nextCheque && !chequeNo ? (
-                    <button type="button" className="link small" onClick={() => setChequeNo(nextCheque)}>
-                      {t("form.nextCheque")} : {nextCheque}
-                    </button>
-                  ) : undefined
-                }
-              >
-                <input
-                  className="input"
-                  value={chequeNo}
-                  placeholder={nextCheque ?? ""}
-                  onChange={(e) => setChequeNo(e.target.value)}
-                />
-              </Field>
-              <Field label={t("form.payee")}>
-                <input
-                  className="input"
-                  value={chequePayee}
-                  placeholder={partyName}
-                  onChange={(e) => setChequePayee(e.target.value)}
-                />
-              </Field>
-              <label className="check cheque-crossed">
-                <input type="checkbox" checked={chequeCrossed} onChange={(e) => setChequeCrossed(e.target.checked)} />{" "}
-                {t("form.chequeCrossed")}
-              </label>
-              <button type="button" className="btn" onClick={doPrintCheque}>
-                🖨 {t("form.printCheque")}
-              </button>
-            </div>
-          </fieldset>
-        )}
-
-        <Field label={t("c.notes")}>
-          <textarea className="input" rows={1} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
+        </fieldset>
+        {isEdit && <TxHistory id={initial.id!} />}
 
         <footer className="form-actions">
           <div className="row">
-            <button type="button" className="btn" disabled={saving} onClick={() => save("print")}>
-              🖨 {t("form.printVoucher")}
-            </button>
-            <span className="muted small">{t("form.ctrlEnter")}</span>
+            {!readOnly && (
+              <button type="button" className="btn" disabled={saving} onClick={() => save("print")}>
+                🖨 {t("form.printVoucher")}
+              </button>
+            )}
+            {!readOnly && <span className="muted small">{t("form.ctrlEnter")}</span>}
           </div>
           <div className="row">
             <button type="button" className="btn ghost" onClick={onClose}>
-              {t("c.cancel")}
+              {readOnly ? t("c.close") : t("c.cancel")}
             </button>
-            {!isEdit && (
+            {!isEdit && !readOnly && (
               <button type="button" className="btn" disabled={saving} onClick={() => save("new")}>
                 {t("form.saveNew")}
               </button>
             )}
-            <button type="submit" className="btn primary" disabled={saving}>
-              {t("c.save")}
-            </button>
+            {!readOnly && (
+              <button type="submit" className="btn primary" disabled={saving}>
+                {t("c.save")}
+              </button>
+            )}
           </div>
         </footer>
       </form>

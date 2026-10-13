@@ -19,7 +19,8 @@ export function Chantiers() {
 
   const q = search.trim().toLowerCase();
   const list = chantiers.filter(
-    (c) => (showArchived || !c.archived) && (!q || c.name.toLowerCase().includes(q) || (c.client ?? "").toLowerCase().includes(q)),
+    (c) =>
+      (showArchived || !c.archived) && (!q || c.name.toLowerCase().includes(q) || (c.client ?? "").toLowerCase().includes(q)),
   );
   const sum = (f: (c: Chantier) => number) => list.reduce((s, c) => s + f(c), 0);
 
@@ -32,7 +33,8 @@ export function Chantiers() {
         </div>
         <div className="row">
           <label className="check">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> {t("c.showArchived")}
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />{" "}
+            {t("c.showArchived")}
           </label>
           <button className="btn primary" onClick={() => setEditing({ name: "" })}>
             {t("ch.new")}
@@ -200,7 +202,13 @@ function ChantierEditor({ value, onClose }: { value: ChantierInput; onClose: () 
         }}
       >
         <Field label={t("c.name")}>
-          <input className="input" autoFocus value={v.name} onChange={(e) => set({ name: e.target.value })} placeholder="200 LOGTS OPGI" />
+          <input
+            className="input"
+            autoFocus
+            value={v.name}
+            onChange={(e) => set({ name: e.target.value })}
+            placeholder="200 LOGTS OPGI"
+          />
         </Field>
         <Field label={t("ch.client")}>
           <input className="input" value={v.client ?? ""} onChange={(e) => set({ client: e.target.value })} />
@@ -210,7 +218,8 @@ function ChantierEditor({ value, onClose }: { value: ChantierInput; onClose: () 
         </Field>
         {v.id && (
           <label className="check">
-            <input type="checkbox" checked={!!v.archived} onChange={(e) => set({ archived: e.target.checked })} /> {t("c.archived")}
+            <input type="checkbox" checked={!!v.archived} onChange={(e) => set({ archived: e.target.checked })} />{" "}
+            {t("c.archived")}
           </label>
         )}
         <footer className="form-actions">

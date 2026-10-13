@@ -12,7 +12,8 @@ type Show = "all" | "owe-you" | "you-owe" | "settled";
 /** "vous doit 50 DA" / "vous lui devez 50 DA" / "réglé" */
 export function useBalanceText() {
   const { fmt, t } = useApp();
-  return (b: number) => (b > 0 ? t("pt.balOwesYou", { v: fmt(b) }) : b < 0 ? t("pt.balYouOwe", { v: fmt(-b) }) : t("pt.balSettled"));
+  return (b: number) =>
+    b > 0 ? t("pt.balOwesYou", { v: fmt(b) }) : b < 0 ? t("pt.balYouOwe", { v: fmt(-b) }) : t("pt.balSettled");
 }
 
 export function Parties() {
@@ -94,7 +95,8 @@ export function Parties() {
           ))}
         </select>
         <label className="check">
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> {t("c.showArchived")}
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />{" "}
+          {t("c.showArchived")}
         </label>
       </div>
 
@@ -121,7 +123,9 @@ export function Parties() {
                   <td>{partyKindLabel(t, p.kind)}</td>
                   <td>{p.phone}</td>
                   <td>{p.lastActivity?.split("-").reverse().join("/")}</td>
-                  <td className={`num strong ${p.balance > 0 ? "pos" : p.balance < 0 ? "neg" : "muted"}`}>{balanceText(p.balance)}</td>
+                  <td className={`num strong ${p.balance > 0 ? "pos" : p.balance < 0 ? "neg" : "muted"}`}>
+                    {balanceText(p.balance)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -300,7 +304,11 @@ function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => voi
         </Field>
         <Field label={t("pt.openingLabel")}>
           <div className="row nowrap-row">
-            <select className="input narrow" value={direction} onChange={(e) => setDirection(e.target.value as "owe-you" | "you-owe")}>
+            <select
+              className="input narrow"
+              value={direction}
+              onChange={(e) => setDirection(e.target.value as "owe-you" | "you-owe")}
+            >
               <option value="owe-you">{t("pt.theyOweMe")}</option>
               <option value="you-owe">{t("pt.iOweThem")}</option>
             </select>
@@ -312,7 +320,8 @@ function PartyEditor({ value, onClose }: { value: PartyInput; onClose: () => voi
         </Field>
         {v.id && (
           <label className="check">
-            <input type="checkbox" checked={!!v.archived} onChange={(e) => set({ archived: e.target.checked })} /> {t("c.archived")}
+            <input type="checkbox" checked={!!v.archived} onChange={(e) => set({ archived: e.target.checked })} />{" "}
+            {t("c.archived")}
           </label>
         )}
         <footer className="form-actions">

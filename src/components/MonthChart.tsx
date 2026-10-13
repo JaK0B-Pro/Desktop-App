@@ -76,7 +76,9 @@ export function MonthChart({ data }: { data: MonthPoint[] }) {
             <div>
               <i style={{ background: "var(--series-out)" }} /> {t("chart.out")} <b>{fmt(hp.expense)}</b>
             </div>
-            <div className="muted">{t("chart.net")} {fmt(hp.income - hp.expense, { sign: true })}</div>
+            <div className="muted">
+              {t("chart.net")} {fmt(hp.income - hp.expense, { sign: true })}
+            </div>
           </div>
         )}
       </div>

@@ -84,8 +84,8 @@ export function LabelInput({ value, onChange, onPick, kind, partyId, chantierId,
     return !!el && el.selectionStart === el.value.length;
   }
 
-  const partyName = (id: number | null) => (id == null ? null : parties.find((p) => p.id === id)?.name ?? null);
-  const chantierName = (id: number | null) => (id == null ? null : chantiers.find((c) => c.id === id)?.name ?? null);
+  const partyName = (id: number | null) => (id == null ? null : (parties.find((p) => p.id === id)?.name ?? null));
+  const chantierName = (id: number | null) => (id == null ? null : (chantiers.find((c) => c.id === id)?.name ?? null));
   const visible = open && items.length > 0 && !(items.length === 1 && items[0].label === value);
 
   return (

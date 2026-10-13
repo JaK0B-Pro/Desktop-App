@@ -1,8 +1,23 @@
 /** Amounts in words, as written on cheques and vouchers. French follows the traditional spelling. */
 
 const FR_UNITS = [
-  "zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf",
-  "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize",
+  "zéro",
+  "un",
+  "deux",
+  "trois",
+  "quatre",
+  "cinq",
+  "six",
+  "sept",
+  "huit",
+  "neuf",
+  "dix",
+  "onze",
+  "douze",
+  "treize",
+  "quatorze",
+  "quinze",
+  "seize",
 ];
 const FR_TENS = ["", "dix", "vingt", "trente", "quarante", "cinquante", "soixante"];
 
@@ -52,8 +67,26 @@ export function numberToFrench(n: number): string {
 }
 
 const EN_UNITS = [
-  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-  "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
 ];
 const EN_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 
@@ -73,7 +106,11 @@ export function numberToEnglish(n: number): string {
   n = Math.floor(Math.abs(n));
   if (n === 0) return "zero";
   const parts: string[] = [];
-  for (const [size, name] of [[1e9, "billion"], [1e6, "million"], [1e3, "thousand"]] as [number, string][]) {
+  for (const [size, name] of [
+    [1e9, "billion"],
+    [1e6, "million"],
+    [1e3, "thousand"],
+  ] as [number, string][]) {
     const g = Math.floor(n / size);
     if (g > 0) parts.push(`${enBelow1000(g)} ${name}`);
     n %= size;
@@ -86,13 +123,7 @@ export function numberToEnglish(n: number): string {
  * "Huit mille deux cent quatre-vingt-huit dinars et cinquante centimes".
  * `currency`/`subunit` are plural names; the trailing "s" is dropped for exactly one.
  */
-export function amountInWords(
-  cents: number,
-  decimals: number,
-  lang: "fr" | "en",
-  currency: string,
-  subunit: string,
-): string {
+export function amountInWords(cents: number, decimals: number, lang: "fr" | "en", currency: string, subunit: string): string {
   const div = 10 ** decimals;
   const whole = Math.floor(Math.abs(cents) / div);
   const frac = Math.abs(cents) % div;

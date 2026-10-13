@@ -2,13 +2,17 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useApp } from "../context";
 import { kindLabel } from "../components/labels";
+import { ChangePassword } from "../components/TopBar";
+import { Users } from "../components/Users";
 import { Empty, Field } from "../components/Modal";
 import { printCheque } from "../print";
 import { today } from "../money";
 import type { Suggestion } from "../types";
 
 export function Settings() {
-  const { settings, updateSetting, fmt, toast, fail, confirm, version, refresh, t, lang, money } = useApp();
+  const { settings, updateSetting, fmt, toast, fail, confirm, version, refresh, t, lang, money, isAdmin, canEdit, user } =
+    useApp();
+  const [pwd, setPwd] = useState(false);
   const [labels, setLabels] = useState<Suggestion[]>([]);
   const [q, setQ] = useState("");
 
@@ -22,6 +26,7 @@ export function Settings() {
         className="input"
         type={type}
         value={settings[key] ?? ""}
+        disabled={!isAdmin}
         onChange={(e) => updateSetting(key, e.target.value).catch(fail)}
       />
     </Field>
@@ -54,12 +59,34 @@ export function Settings() {
       </header>
 
       <section className="card">
+        <div className="card-head">
+          <div>
+            <h3>{t("set.myAccount")}</h3>
+            <p className="muted small">
+              {user.fullName || user.username} · {t(`usr.role.${user.role}`)}
+            </p>
+          </div>
+          <button className="btn small" onClick={() => setPwd(true)}>
+            🔑 {t("auth.changePassword")}
+          </button>
+        </div>
+      </section>
+      {pwd && <ChangePassword onClose={() => setPwd(false)} />}
+
+      {!isAdmin && <p className="muted small">🔒 {t("set.adminOnly")}</p>}
+      <section className="card">
         <h3>{t("set.company")}</h3>
         <div className="grid-3">
           {text("company_name", t("set.companyName"))}
           {text("company_activity", t("set.companyActivity"))}
+          {text("company_address", t("set.companyAddress"))}
           <Field label={t("set.language")}>
-            <select className="input" value={lang} onChange={(e) => updateSetting("language", e.target.value).catch(fail)}>
+            <select
+              className="input"
+              disabled={!isAdmin}
+              value={lang}
+              onChange={(e) => updateSetting("language", e.target.value).catch(fail)}
+            >
               <option value="fr">Français</option>
               <option value="en">English</option>
             </select>
@@ -75,6 +102,7 @@ export function Settings() {
             <select
               className="input"
               value={settings.currency_position ?? "after"}
+              disabled={!isAdmin}
               onChange={(e) => updateSetting("currency_position", e.target.value).catch(fail)}
             >
               <option value="before">{t("set.before")}</option>
@@ -85,6 +113,7 @@ export function Settings() {
             <select
               className="input"
               value={settings.decimals ?? "2"}
+              disabled={!isAdmin}
               onChange={async (e) => {
                 const v = e.target.value;
                 if (await confirm(t("set.decimalsConfirm"), t("c.change"))) updateSetting("decimals", v).catch(fail);
@@ -114,6 +143,7 @@ export function Settings() {
             <input
               type="checkbox"
               checked={settings.cheque_vertical === "1"}
+              disabled={!isAdmin}
               onChange={(e) => updateSetting("cheque_vertical", e.target.checked ? "1" : "0").catch(fail)}
             />{" "}
             {t("set.chequeVertical")}
@@ -191,6 +221,8 @@ export function Settings() {
         )}
       </section>
 
+      {isAdmin && <Users />}
+
       <section className="card">
         <h3>{t("set.data")}</h3>
         <p className="muted small">{t("set.dataHint")}</p>
@@ -198,7 +230,7 @@ export function Settings() {
           <button className="btn" onClick={() => run(api.exportCsv, (p) => t("set.exported", { p }))}>
             {t("set.export")}
           </button>
-          <button className="btn" onClick={() => run(api.backupDatabase, (p) => t("set.backedUp", { p }))}>
+          <button className="btn" disabled={!canEdit} onClick={() => run(api.backupDatabase, (p) => t("set.backedUp", { p }))}>
             {t("set.backup")}
           </button>
         </div>

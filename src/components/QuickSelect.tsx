@@ -37,7 +37,11 @@ export function PartySelect({ value, onChange }: { value: number | null; onChang
             }
           }}
         />
-        <select className="input narrow" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as PartyKind })}>
+        <select
+          className="input narrow"
+          value={draft.kind}
+          onChange={(e) => setDraft({ ...draft, kind: e.target.value as PartyKind })}
+        >
           {PARTY_KINDS.map((k) => (
             <option key={k} value={k}>
               {partyKindLabel(t, k)}

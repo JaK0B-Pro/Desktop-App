@@ -15,7 +15,8 @@ export function Accounts() {
   const total = accounts.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
   const selected = accounts.find((a) => a.id === route.accountId);
 
-  if (selected) return <AccountDetail account={selected} onEdit={() => setEditing(selected)} editing={editing} setEditing={setEditing} />;
+  if (selected)
+    return <AccountDetail account={selected} onEdit={() => setEditing(selected)} editing={editing} setEditing={setEditing} />;
 
   return (
     <div className="page">
@@ -32,7 +33,17 @@ export function Accounts() {
           <button className="btn" onClick={() => openTx({ kind: "transfer" })}>
             {t("acc.transfer")}
           </button>
-          <button className="btn primary" onClick={() => setEditing({ name: "", kind: "cash", openingBalance: 0, color: ACCOUNT_COLORS[accounts.length % ACCOUNT_COLORS.length] })}>
+          <button
+            className="btn primary"
+            onClick={() =>
+              setEditing({
+                name: "",
+                kind: "cash",
+                openingBalance: 0,
+                color: ACCOUNT_COLORS[accounts.length % ACCOUNT_COLORS.length],
+              })
+            }
+          >
             {t("acc.new")}
           </button>
         </div>
@@ -113,7 +124,10 @@ function AccountDetail({
           <button className="btn" onClick={() => openTx({ kind: "expense", lines: [{ accountId: account.id, amount: 0 }] })}>
             − {t("kind.expense")}
           </button>
-          <button className="btn primary" onClick={() => openTx({ kind: "income", lines: [{ accountId: account.id, amount: 0 }] })}>
+          <button
+            className="btn primary"
+            onClick={() => openTx({ kind: "income", lines: [{ accountId: account.id, amount: 0 }] })}
+          >
             + {t("kind.income")}
           </button>
         </div>
@@ -182,7 +196,13 @@ function AccountEditor({ value, onClose }: { value: AccountInput; onClose: () =>
         }}
       >
         <Field label={t("c.name")}>
-          <input className="input" autoFocus value={v.name} onChange={(e) => set({ name: e.target.value })} placeholder={t("acc.namePh")} />
+          <input
+            className="input"
+            autoFocus
+            value={v.name}
+            onChange={(e) => set({ name: e.target.value })}
+            placeholder={t("acc.namePh")}
+          />
         </Field>
         <div className="grid-2">
           <Field label={t("c.type")}>

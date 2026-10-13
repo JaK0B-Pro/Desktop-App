@@ -105,31 +105,31 @@ export interface TxInput {
 export interface LineView {
   accountId: number;
   accountName: string;
-  chantierId: number | null;
-  chantierName: string | null;
+  chantierId?: number | null;
+  chantierName?: string | null;
   amount: number;
 }
 
+/** Optional fields are omitted from the JSON when empty (keeps large years light). */
 export interface Transaction {
   id: number;
   date: string;
   kind: TxKind;
   label: string;
-  partyId: number | null;
-  partyName: string | null;
-  chantierId: number | null;
-  chantierName: string | null;
-  family: string | null;
+  partyId?: number | null;
+  partyName?: string | null;
+  chantierId?: number | null;
+  chantierName?: string | null;
+  family?: string | null;
   status: TxStatus;
-  chequeNo: string | null;
-  chequeCrossed: boolean;
-  chequePayee: string | null;
+  chequeNo?: string | null;
+  chequeCrossed?: boolean;
+  chequePayee?: string | null;
   amount: number;
-  notes: string | null;
+  notes?: string | null;
   lines: LineView[];
-  createdAt: string;
-  effect: number | null;
-  runningBalance: number | null;
+  effect?: number | null;
+  runningBalance?: number | null;
 }
 
 export interface TxFilter {
@@ -142,6 +142,8 @@ export interface TxFilter {
   family?: string | null;
   status?: string | null;
   search?: string | null;
+  minAmount?: number | null;
+  maxAmount?: number | null;
   limit?: number | null;
 }
 
@@ -207,3 +209,70 @@ export interface Report {
 }
 
 export type Settings = Record<string, string>;
+
+export type Role = "admin" | "user" | "viewer";
+
+export interface User {
+  id: number;
+  username: string;
+  fullName: string | null;
+  role: Role;
+  active: boolean;
+  createdAt: string;
+  lastLogin: string | null;
+}
+
+export interface UserInput {
+  id?: number | null;
+  username: string;
+  fullName?: string | null;
+  role: Role;
+  active: boolean;
+  password?: string | null;
+}
+
+export interface AuthStatus {
+  needsSetup: boolean;
+  user: User | null;
+  dbWarning: string | null;
+}
+
+export interface Exercise {
+  year: number;
+  closed: boolean;
+  closedAt: string | null;
+  closedBy: string | null;
+  count: number;
+  income: number;
+  expense: number;
+}
+
+export interface AuditEntry {
+  id: number;
+  at: string;
+  username: string | null;
+  action: "create" | "update" | "delete" | "restore" | "close" | "reopen" | "login";
+  entity: "transaction" | "exercise" | "user";
+  entityId: number | null;
+  summary: string;
+  before?: Transaction;
+  after?: Transaction;
+  exists: boolean;
+}
+
+export interface AuditFilter {
+  entityId?: number | null;
+  from?: string | null;
+  to?: string | null;
+  limit?: number | null;
+}
+
+export interface BalanceRow {
+  id: number;
+  name: string;
+  kind: string;
+  initial: number;
+  debit: number;
+  credit: number;
+  balance: number;
+}

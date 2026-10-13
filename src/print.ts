@@ -38,7 +38,13 @@ export interface PrintCtx {
 }
 
 function words(c: PrintCtx, cents: number) {
-  return amountInWords(cents, c.decimals, c.lang, c.settings.currency_name ?? "dinars", c.settings.currency_subunit ?? "centimes");
+  return amountInWords(
+    cents,
+    c.decimals,
+    c.lang,
+    c.settings.currency_name ?? "dinars",
+    c.settings.currency_subunit ?? "centimes",
+  );
 }
 
 const frDate = (d: string) => {
@@ -56,7 +62,12 @@ export function printVoucher(c: PrintCtx, tx: Transaction) {
   const { t } = c;
   const rows: [string, string][] = [
     [t("col.date"), frDate(tx.date)],
-    [t("col.account"), tx.lines.map((l) => `${esc(l.accountName)}${tx.lines.length > 1 ? ` : ${esc(c.fmt(Math.abs(l.amount)))}` : ""}`).join("<br>")],
+    [
+      t("col.account"),
+      tx.lines
+        .map((l) => `${esc(l.accountName)}${tx.lines.length > 1 ? ` : ${esc(c.fmt(Math.abs(l.amount)))}` : ""}`)
+        .join("<br>"),
+    ],
     [t("col.chantier"), esc([...new Set([tx.chantierName, ...tx.lines.map((l) => l.chantierName)].filter(Boolean))].join(", "))],
     [t("col.party"), esc(tx.partyName)],
     [t("col.family"), esc(tx.family)],
@@ -79,10 +90,7 @@ export function printVoucher(c: PrintCtx, tx: Transaction) {
 }
 
 /** Prints the cheque fields at their positions on a bank cheque (mm), with calibration offsets. */
-export function printCheque(
-  c: PrintCtx,
-  data: { amount: number; payee: string; date: string; crossed: boolean },
-) {
+export function printCheque(c: PrintCtx, data: { amount: number; payee: string; date: string; crossed: boolean }) {
   const s = c.settings;
   const ox = Number.parseFloat(s.cheque_offset_x ?? "0") || 0;
   const oy = Number.parseFloat(s.cheque_offset_y ?? "0") || 0;
@@ -91,7 +99,10 @@ export function printCheque(
   // Split the words over the two lines of the cheque.
   const cut = w.length > 60 ? w.lastIndexOf(" ", 60) : -1;
   const [l1, l2] = cut > 0 ? [w.slice(0, cut), w.slice(cut + 1)] : [w, ""];
-  const amount = c.fmt(data.amount).replace(/\s*[^\d.,\s-]+\s*/g, "").trim();
+  const amount = c
+    .fmt(data.amount)
+    .replace(/\s*[^\d.,\s-]+\s*/g, "")
+    .trim();
   const at = (x: number, y: number, text: string, cls = "") =>
     `<div class="chq-f ${cls}" style="left:${x + ox}mm;top:${y + oy}mm">${esc(text)}</div>`;
   const body = `
@@ -108,7 +119,14 @@ export function printCheque(
 }
 
 /** Prints a list of transactions as a table with a total, like the journal grid. */
-export function printList(c: PrintCtx, title: string, from: string, to: string, rows: Transaction[], signed: (t: Transaction) => number) {
+export function printList(
+  c: PrintCtx,
+  title: string,
+  from: string,
+  to: string,
+  rows: Transaction[],
+  signed: (t: Transaction) => number,
+) {
   const { t } = c;
   const total = rows.reduce((s, r) => s + signed(r), 0);
   const body = rows

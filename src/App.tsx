@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 import { useApp, type JournalKind, type Page } from "./context";
 import type { TKey } from "./i18n";
+import { TopBar } from "./components/TopBar";
 import { TransactionForm } from "./components/TransactionForm";
+import { Etat } from "./pages/Etat";
+import { History } from "./pages/History";
 import { Accounts } from "./pages/Accounts";
 import { Chantiers } from "./pages/Chantiers";
 import { Dashboard } from "./pages/Dashboard";
@@ -24,19 +27,19 @@ const NAV: (NavItem | "sep")[] = [
   { page: "accounts", icon: "◫", label: "nav.accounts" },
   { page: "chantiers", icon: "⌂", label: "nav.chantiers" },
   { page: "parties", icon: "☺", label: "nav.parties" },
+  { page: "etat", icon: "⚖", label: "nav.etat" },
   { page: "reports", icon: "▤", label: "nav.reports" },
+  { page: "history", icon: "🕘", label: "nav.history" },
   { page: "settings", icon: "⚙", label: "nav.settings" },
 ];
 
-const frDate = (d: string) => d.split("-").reverse().join("/");
-
 export function App() {
-  const { route, navigate, openTx, txDraft, closeTx, fmt, accounts, t, settings, years, exercise, setExercise, range } = useApp();
+  const { route, navigate, openTx, txDraft, closeTx, fmt, accounts, t, canEdit } = useApp();
 
   // Ctrl/Cmd+N: new entry from anywhere (same type as the open journal).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+      if (canEdit && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         const j = route.page === "journal" ? route.journal : undefined;
         openTx({ kind: j === "income" || j === "transfer" ? j : j === "credit" ? "purchase" : "expense" });
@@ -44,30 +47,14 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openTx, route]);
+  }, [openTx, route, canEdit]);
 
   const total = accounts.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
   const isOn = (n: NavItem) => route.page === n.page && (n.page !== "journal" || route.journal === n.journal);
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="company">
-          <strong>{settings.company_name || "AccountBook"}</strong>
-          {settings.company_activity && <span>{settings.company_activity}</span>}
-        </div>
-        <div className="exercise">
-          <span className="muted">{t("app.exercise")}</span>
-          {years.slice(0, 4).map((y) => (
-            <button key={y} className={`year ${y === exercise ? "on" : ""}`} onClick={() => setExercise(y)}>
-              📒 {y}
-            </button>
-          ))}
-          <span className="muted small">
-            {t("app.from")} <b>{frDate(range.from)}</b> {t("app.to")} <b>{frDate(range.to)}</b>
-          </span>
-        </div>
-      </header>
+      <TopBar />
       <aside className="sidebar">
         <div className="brand">
           <div className="logo">AB</div>
@@ -76,9 +63,11 @@ export function App() {
             <small>{fmt(total)}</small>
           </div>
         </div>
-        <button className="btn primary block" onClick={() => openTx()}>
-          + {t("nav.new")} <kbd>Ctrl N</kbd>
-        </button>
+        {canEdit && (
+          <button className="btn primary block" onClick={() => openTx()}>
+            + {t("nav.new")} <kbd>Ctrl N</kbd>
+          </button>
+        )}
         <nav>
           {NAV.map((n, i) =>
             n === "sep" ? (
@@ -104,6 +93,8 @@ export function App() {
         {route.page === "parties" && <Parties />}
         {route.page === "reports" && <Reports />}
         {route.page === "settings" && <Settings />}
+        {route.page === "etat" && <Etat />}
+        {route.page === "history" && <History />}
       </main>
       {txDraft && <TransactionForm key={JSON.stringify(txDraft)} initial={txDraft} onClose={closeTx} />}
     </div>
