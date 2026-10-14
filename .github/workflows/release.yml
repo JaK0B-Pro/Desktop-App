@@ -1,7 +1,8 @@
 # Builds the Windows installers of each version and publishes them on the GitHub "Releases" page.
 #
 # - Every push checks the version in package.json; if release `v<version>` does not exist yet,
-#   the installers are built and the release (and its tag) is created on that commit.
+#   the installers are built (signed for the in-app updater, with the CHANGELOG section as notes) and
+#   the release (and its tag) is created on that commit.
 #   So a new version is published by raising the version number (package.json, Cargo.toml,
 #   tauri.conf.json) in a commit.
 # - Older versions can be built from the Actions tab: "Build installers" → "Run workflow",
@@ -33,6 +34,7 @@ jobs:
       build: ${{ steps.plan.outputs.build }}
       version: ${{ steps.plan.outputs.version }}
       commit: ${{ steps.plan.outputs.commit }}
+      notes: ${{ steps.plan.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +47,14 @@ jobs:
           version="${INPUT_VERSION:-$(node -p "require('./package.json').version")}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # "What's new" = this version's section of CHANGELOG.md (shown in the app's update window).
+          {
+            echo "notes<<END_OF_NOTES"
+            if [ -f CHANGELOG.md ]; then
+              awk -v v="## $version" 'index($0, v) == 1 {on=1; next} /^## / {on=0} on' CHANGELOG.md | sed '/^Commit `/d'
+            fi
+            echo "END_OF_NOTES"
+          } >> "$GITHUB_OUTPUT"
           if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release v$version already exists — nothing to build."
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -75,14 +85,18 @@ jobs:
           workspaces: src-tauri -> target
 
       # The installer and the app show this version (older commits all said 0.1.0).
+      # Update files (signed, for the in-app updater) are only produced when the signing key is set.
       - name: Set app version
         shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
           node -e "
             const fs = require('fs');
             const f = 'src-tauri/tauri.conf.json';
             const c = JSON.parse(fs.readFileSync(f, 'utf8'));
             c.version = process.env.VERSION;
+            if (c.bundle && process.env.HAS_KEY !== 'true') c.bundle.createUpdaterArtifacts = false;
             fs.writeFileSync(f, JSON.stringify(c, null, 2));
           "
 
@@ -91,16 +105,12 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v${{ env.VERSION }}
           releaseName: AccountBook v${{ env.VERSION }}
           releaseCommitish: ${{ needs.plan.outputs.commit }}
-          releaseBody: |
-            Version de test **v${{ env.VERSION }}** — voir CHANGELOG.md pour le détail des nouveautés.
-
-            Installation sur Windows : téléchargez `AccountBook_…_x64-setup.exe` (ou le `.msi`) ci-dessous et lancez-le.
-            Windows peut afficher « Windows a protégé votre ordinateur » (application non signée) : cliquez sur
-            « Informations complémentaires » puis « Exécuter quand même ».
-
-            Vos données sont conservées d'une version à l'autre (base de données mise à jour automatiquement).
-          prerelease: true
+          releaseBody: ${{ needs.plan.outputs.notes }}
+          # Not a pre-release: the app looks for updates in the latest release.
+          prerelease: false

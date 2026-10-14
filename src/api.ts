@@ -81,6 +81,7 @@ export const api = {
   getReport: (from: string, to: string) => invoke<Report>("get_report", { from, to }),
   exportCsv: () => invoke<string>("export_csv"),
   backupDatabase: () => invoke<string>("backup_database"),
+  backupBeforeUpdate: () => invoke<string>("backup_before_update"),
 };
 
 export function errorText(e: unknown): string {

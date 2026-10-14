@@ -58,6 +58,30 @@ export function Settings() {
         <h1>{t("nav.settings")}</h1>
       </header>
 
+      {!isAdmin && <p className="muted small">🔒 {t("set.adminOnly")}</p>}
+      <section className="card company-card">
+        <h3>🏢 {t("set.company")}</h3>
+        <div className="grid-3">
+          {text("company_name", t("set.companyName"))}
+          {text("company_activity", t("set.companyActivity"))}
+          {text("company_address", t("set.companyAddress"))}
+          {text("company_phone", t("set.companyPhone"))}
+          {text("company_email", t("set.companyEmail"))}
+          {text("company_id", t("set.companyId"))}
+          <Field label={t("set.language")}>
+            <select
+              className="input"
+              disabled={!isAdmin}
+              value={lang}
+              onChange={(e) => updateSetting("language", e.target.value).catch(fail)}
+            >
+              <option value="fr">Français</option>
+              <option value="en">English</option>
+            </select>
+          </Field>
+        </div>
+      </section>
+
       <section className="card">
         <div className="card-head">
           <div>
@@ -72,27 +96,6 @@ export function Settings() {
         </div>
       </section>
       {pwd && <ChangePassword onClose={() => setPwd(false)} />}
-
-      {!isAdmin && <p className="muted small">🔒 {t("set.adminOnly")}</p>}
-      <section className="card">
-        <h3>{t("set.company")}</h3>
-        <div className="grid-3">
-          {text("company_name", t("set.companyName"))}
-          {text("company_activity", t("set.companyActivity"))}
-          {text("company_address", t("set.companyAddress"))}
-          <Field label={t("set.language")}>
-            <select
-              className="input"
-              disabled={!isAdmin}
-              value={lang}
-              onChange={(e) => updateSetting("language", e.target.value).catch(fail)}
-            >
-              <option value="fr">Français</option>
-              <option value="en">English</option>
-            </select>
-          </Field>
-        </div>
-      </section>
 
       <section className="card">
         <h3>{t("set.currency")}</h3>

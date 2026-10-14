@@ -104,7 +104,7 @@ export function Dashboard() {
       <section className="card flush">
         <div className="card-head padded">
           <h3>{t("dash.recent")}</h3>
-          <button className="btn small ghost" onClick={() => navigate({ page: "journal", journal: "all" })}>
+          <button className="btn small ghost" onClick={() => navigate({ page: "journal", journal: "expense" })}>
             {t("dash.seeAll")}
           </button>
         </div>

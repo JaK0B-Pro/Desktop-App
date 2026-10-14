@@ -5,7 +5,19 @@ Every delivery is a numbered version. Each version has Windows installers on the
 before going further.
 Installing a newer version keeps your data: the database is upgraded automatically.
 
+## 0.5.0 — Menu bar, automatic updates, dark mode
+
+- **Menu bar** at the top: Fichier · Opérations · Tiers · États · Outils · Aide. Every screen and action is there.
+- The **side panel is closed** by default (☰ opens it), so the windows use the full width.
+- The general Journal page is removed: each window (Dépenses, Versements, Virements, Crédits) has its own filters and total.
+- **Light / dark mode** switch (☀ / 🌙) in the menu bar and on the login screen.
+- **Automatic updates**: when a new version is published, a window shows what's new and installs it in one click. A backup copy of the database is made first, and your data is kept. *Aide → Vérifier les mises à jour* checks on demand.
+- **Paramètres**: the *Entreprise* section comes first, with phone, e-mail and NIF / RC.
+- Installing 0.5.0 by hand is needed once; later versions update themselves.
+
 ## 0.4.0 — Virements
+
+Commit `eb7ecad`.
 
 - **Virement** button in the top bar: transfer money from one account to another in a few clicks.
 - In the transfer window:

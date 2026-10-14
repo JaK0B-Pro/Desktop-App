@@ -41,8 +41,38 @@
   background: var(--bg);
 }
 
+:root[data-theme="dark"] {
+  --bg: #111418;
+  --surface: #1a1e24;
+  --surface-2: #222830;
+  --border: #2d343e;
+  --text: #e8ebf0;
+  --text-2: #b4bcc8;
+  --muted: #7d8696;
+  --primary: #3b82f6;
+  --primary-soft: #1d2b45;
+  --pos: #4ade80;
+  --neg: #fb923c;
+  --danger: #f87171;
+  --warn: #fbbf24;
+  --series-in: #3987e5;
+  --series-out: #d95926;
+  --k-income: #4ade80;
+  --k-expense: #fb923c;
+  --k-transfer: #60a5fa;
+  --k-purchase: #c084fc;
+  --k-sale: #22d3ee;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --grid-head: #1f2b3d;
+  --grid-head-ink: #b9cdf0;
+  --grid-alt: #1d2229;
+  --grid-sel: #2f5fc4;
+  --grid-sel-ink: #ffffff;
+  color-scheme: dark;
+}
+/* No choice made yet: follow the Windows theme. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111418;
     --surface: #1a1e24;
     --surface-2: #222830;
@@ -2066,4 +2096,253 @@ fieldset.plain {
 
 .table.grid.fixed.transfers .col-account {
   width: 34%;
+}
+
+/* ---- light / dark switch ---- */
+.theme-switch {
+  position: relative;
+  width: 46px;
+  height: 24px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+.theme-switch .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+.theme-switch.dark .knob {
+  transform: translateX(22px);
+}
+
+/* ---- layout: menu bar, enterprise bar, content (side panel optional) ---- */
+.app {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: "menu" "top" "main";
+}
+.app.with-sidebar {
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-areas: "menu menu" "top top" "side main";
+}
+
+/* ---- menu bar (Fichier · Opérations · …) ---- */
+.menubar {
+  grid-area: menu;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  position: relative;
+  z-index: 30;
+  user-select: none;
+}
+.menu-toggle {
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 15px;
+  width: 30px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 4px;
+}
+.menu-toggle:hover,
+.menu-toggle.on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.menubar-item {
+  position: relative;
+}
+.menubar-btn {
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.menubar-btn:hover,
+.menubar-btn.open {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.menubar-drop {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 250px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+}
+.menubar-drop hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 6px;
+}
+.menubar-drop button {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.menubar-drop button:hover:not(:disabled) {
+  background: var(--primary);
+  color: #fff;
+}
+.menubar-drop button.on {
+  font-weight: 650;
+  color: var(--primary);
+}
+.menubar-drop button.on:hover {
+  color: #fff;
+}
+.menubar-drop button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mi-icon {
+  text-align: center;
+  opacity: 0.8;
+}
+.menubar-drop kbd {
+  margin-left: 12px;
+}
+.menubar-space {
+  flex: 1;
+}
+.menubar-user {
+  color: var(--text-2);
+  margin-left: 10px;
+  white-space: nowrap;
+}
+.update-pill {
+  border: 1px solid var(--pos);
+  background: color-mix(in srgb, var(--pos) 12%, transparent);
+  color: var(--pos);
+  border-radius: 99px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  margin-right: 10px;
+}
+.topbar {
+  padding-left: 16px;
+}
+
+/* ---- update window ---- */
+.update-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.update-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.big-logo {
+  width: 52px;
+  height: 52px;
+  font-size: 18px;
+  border-radius: 14px;
+}
+.update-versions {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 20px;
+}
+.update-versions .arrow {
+  color: var(--muted);
+}
+.update-versions strong {
+  color: var(--primary);
+}
+.update-notes .update-body {
+  white-space: pre-wrap;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  max-height: 200px;
+  overflow: auto;
+  margin-top: 4px;
+}
+.update-safe {
+  margin: 0;
+  font-size: 13px;
+  color: var(--pos);
+}
+.update-progress .bar {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.update-progress .bar div {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 99px;
+  transition: width 0.2s ease;
+}
+.update-progress .bar div.indeterminate {
+  animation: slide 1.2s ease-in-out infinite;
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.about {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  padding-bottom: 10px;
+}
+.auth-foot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
 }

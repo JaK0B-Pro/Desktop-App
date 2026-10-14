@@ -123,7 +123,7 @@ fn get_public_settings(state: State<AppState>) -> Res<HashMap<String, String>> {
     let all = ledger::get_settings(&*lock_db(&state)?)?;
     Ok(all
         .into_iter()
-        .filter(|(k, _)| matches!(k.as_str(), "language" | "company_name" | "company_activity" | "company_address"))
+        .filter(|(k, _)| matches!(k.as_str(), "language" | "company_name" | "company_activity" | "company_address" | "company_phone"))
         .collect())
 }
 
@@ -343,9 +343,22 @@ fn backup_database(app: AppHandle, state: State<AppState>) -> Res<String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Safety copy of the database taken right before an update is installed
+/// (kept in `<app data>/backups` next to the daily copies).
+#[tauri::command(async)]
+fn backup_before_update(app: AppHandle, state: State<AppState>) -> Res<String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("pre-update-{}.db", stamp()));
+    authed(&state, "viewer", |c, _| ledger::backup_to(c, &path))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -404,6 +417,7 @@ pub fn run() {
             get_report,
             export_csv,
             backup_database,
+            backup_before_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AccountBook");

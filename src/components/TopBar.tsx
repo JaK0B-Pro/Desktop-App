@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api } from "../api";
 import { useApp } from "../context";
 import { Field, Modal } from "./Modal";
@@ -10,39 +10,11 @@ const frDate = (d: string) => d.split("-").reverse().join("/");
  * pulled out. "+" adds the next year; the lock closes ("clôture") or reopens the selected year.
  */
 export function TopBar() {
-  const {
-    settings,
-    exercises,
-    exercise,
-    setExercise,
-    range,
-    t,
-    fmt,
-    isAdmin,
-    canEdit,
-    confirm,
-    toast,
-    fail,
-    reloadAll,
-    navigate,
-    route,
-    user,
-    logout,
-    openTx,
-  } = useApp();
+  const { settings, exercises, exercise, setExercise, range, t, fmt, isAdmin, canEdit, confirm, toast, fail, reloadAll, openTx } =
+    useApp();
   const [adding, setAdding] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [pwd, setPwd] = useState(false);
   const current = exercises.find((x) => x.year === exercise);
   const nextYear = Math.max(new Date().getFullYear(), ...exercises.map((x) => x.year)) + 1;
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = (e: MouseEvent) => !menuRef.current?.contains(e.target as Node) && setMenu(false);
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [menu]);
 
   async function toggleClosed() {
     if (!current) return;
@@ -115,41 +87,15 @@ export function TopBar() {
 
       <div className="top-actions">
         {canEdit && (
-          <button className="btn small" disabled={current?.closed} onClick={() => openTx({ kind: "transfer" })}>
-            ⇄ {t("tr.quick")}
-          </button>
+          <>
+            <button className="btn small primary" disabled={current?.closed} onClick={() => openTx()}>
+              + {t("nav.new")}
+            </button>
+            <button className="btn small" disabled={current?.closed} onClick={() => openTx({ kind: "transfer" })}>
+              ⇄ {t("tr.quick")}
+            </button>
+          </>
         )}
-        <button className={`btn small ${route.page === "etat" ? "primary" : ""}`} onClick={() => navigate({ page: "etat" })}>
-          ⚖ {t("nav.etat")}
-        </button>
-        <button
-          className={`btn small ${route.page === "history" ? "primary" : ""}`}
-          onClick={() => navigate({ page: "history" })}
-        >
-          🕘 {t("nav.history")}
-        </button>
-        <div className="user-menu" ref={menuRef}>
-          <button className="btn small ghost" onClick={() => setMenu((m) => !m)}>
-            👤 {user.fullName || user.username} ▾
-          </button>
-          {menu && (
-            <div className="menu">
-              <div className="menu-head">
-                <strong>{user.fullName || user.username}</strong>
-                <span className="muted small">{t(`usr.role.${user.role}`)}</span>
-              </div>
-              <button
-                onClick={() => {
-                  setMenu(false);
-                  setPwd(true);
-                }}
-              >
-                🔑 {t("auth.changePassword")}
-              </button>
-              <button onClick={logout}>⎋ {t("auth.logout")}</button>
-            </div>
-          )}
-        </div>
       </div>
 
       {adding && (
@@ -163,12 +109,19 @@ export function TopBar() {
           }}
         />
       )}
-      {pwd && <ChangePassword onClose={() => setPwd(false)} />}
     </header>
   );
 }
 
-function NewExercise({ initial, onClose, onCreated }: { initial: number; onClose: () => void; onCreated: (y: number) => void }) {
+export function NewExercise({
+  initial,
+  onClose,
+  onCreated,
+}: {
+  initial: number;
+  onClose: () => void;
+  onCreated: (y: number) => void;
+}) {
   const { t, fail } = useApp();
   const [year, setYear] = useState(String(initial));
   return (

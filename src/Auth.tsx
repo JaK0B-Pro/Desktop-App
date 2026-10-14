@@ -5,6 +5,7 @@ import { AppProvider } from "./context";
 import { makeT, translateError, type Lang } from "./i18n";
 import type { Exercise, Settings, User } from "./types";
 import { useAppVersion } from "./version";
+import { ThemeSwitch } from "./theme";
 
 function AuthVersion() {
   const v = useAppVersion();
@@ -89,7 +90,10 @@ export function AuthGate() {
             }}
           />
         )}
-        <AuthVersion />
+        <div className="auth-foot">
+          <AuthVersion />
+          <ThemeSwitch title={lang === "fr" ? "Mode clair / sombre" : "Light / dark mode"} />
+        </div>
         <div className="auth-lang">
           {(["fr", "en"] as Lang[]).map((l) => (
             <button key={l} className={l === lang ? "on" : ""} onClick={() => setLang(l)}>

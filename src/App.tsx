@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { MenuBar } from "./components/MenuBar";
 import { useAppVersion } from "./version";
 import { useApp, type JournalKind, type Page } from "./context";
 import type { TKey } from "./i18n";
@@ -23,7 +24,6 @@ const NAV: (NavItem | "sep")[] = [
   { page: "journal", journal: "income", icon: "↓", label: "nav.income" },
   { page: "journal", journal: "transfer", icon: "⇄", label: "nav.transfer" },
   { page: "journal", journal: "credit", icon: "⧗", label: "nav.credit" },
-  { page: "journal", journal: "all", icon: "≡", label: "nav.all" },
   "sep",
   { page: "accounts", icon: "◫", label: "nav.accounts" },
   { page: "chantiers", icon: "⌂", label: "nav.chantiers" },
@@ -51,46 +51,66 @@ export function App() {
   }, [openTx, route, canEdit]);
 
   const version = useAppVersion();
+  // The side panel is closed by default: everything is in the menu bar.
+  const [sidebar, setSidebar] = useState(() => {
+    try {
+      return localStorage.getItem("sidebar") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = () =>
+    setSidebar((v) => {
+      try {
+        localStorage.setItem("sidebar", v ? "0" : "1");
+      } catch {
+        /* optional */
+      }
+      return !v;
+    });
   const total = accounts.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
   const isOn = (n: NavItem) => route.page === n.page && (n.page !== "journal" || route.journal === n.journal);
 
   return (
-    <div className="app">
+    <div className={`app ${sidebar ? "with-sidebar" : ""}`}>
+      <MenuBar sidebar={sidebar} toggleSidebar={toggleSidebar} />
       <TopBar />
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="logo">AB</div>
-          <div>
-            <strong>AccountBook</strong>
-            <small>{fmt(total)}</small>
-            {version && <small className="version">{t("app.version", { v: version })}</small>}
+      {sidebar && (
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="logo">AB</div>
+            <div>
+              <strong>AccountBook</strong>
+              <small>{fmt(total)}</small>
+              {version && <small className="version">{t("app.version", { v: version })}</small>}
+            </div>
           </div>
-        </div>
-        {canEdit && (
-          <button className="btn primary block" onClick={() => openTx()}>
-            + {t("nav.new")} <kbd>Ctrl N</kbd>
-          </button>
-        )}
-        <nav>
-          {NAV.map((n, i) =>
-            n === "sep" ? (
-              <hr key={i} />
-            ) : (
-              <button
-                key={n.label}
-                className={`nav-item ${isOn(n) ? "on" : ""}`}
-                onClick={() => navigate({ page: n.page, journal: n.journal })}
-              >
-                <span className="nav-icon">{n.icon}</span>
-                {t(n.label)}
-              </button>
-            ),
+          {canEdit && (
+            <button className="btn primary block" onClick={() => openTx()}>
+              + {t("nav.new")} <kbd>Ctrl N</kbd>
+            </button>
           )}
-        </nav>
-      </aside>
+          <nav>
+            {NAV.map((n, i) =>
+              n === "sep" ? (
+                <hr key={i} />
+              ) : (
+                <button
+                  key={n.label}
+                  className={`nav-item ${isOn(n) ? "on" : ""}`}
+                  onClick={() => navigate({ page: n.page, journal: n.journal })}
+                >
+                  <span className="nav-icon">{n.icon}</span>
+                  {t(n.label)}
+                </button>
+              ),
+            )}
+          </nav>
+        </aside>
+      )}
       <main className="content">
         {route.page === "dashboard" && <Dashboard />}
-        {route.page === "journal" && <Journal key={route.journal} kind={route.journal ?? "all"} />}
+        {route.page === "journal" && <Journal key={route.journal} kind={route.journal ?? "expense"} />}
         {route.page === "accounts" && <Accounts />}
         {route.page === "chantiers" && <Chantiers />}
         {route.page === "parties" && <Parties />}
