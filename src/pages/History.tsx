@@ -6,6 +6,9 @@ import { toInput } from "../components/TransactionTable";
 import { diffTx, formatAt } from "../components/TxHistory";
 import type { AuditEntry } from "../types";
 
+/** N° of the entry as recorded in the history (older records, from before per-type numbering, show "—"). */
+const numOf = (r: AuditEntry) => (r.after ?? r.before)?.num || "—";
+
 /** The change log ("historique"): who created, changed or deleted which entry, and when. */
 export function History() {
   const { t, fmt, fail, openTx, canEdit, reloadAll, notifySaved, toast, txChange, reloadKey } = useApp();
@@ -24,7 +27,7 @@ export function History() {
       (r) =>
         (!onlyTx || r.entity === "transaction") &&
         (!s ||
-          `${r.entityId} ${r.username} ${r.summary} ${r.before?.label ?? ""} ${r.after?.label ?? ""}`.toLowerCase().includes(s)),
+          `${numOf(r)} ${r.username} ${r.summary} ${r.before?.label ?? ""} ${r.after?.label ?? ""}`.toLowerCase().includes(s)),
     );
   }, [rows, onlyTx, q]);
 
@@ -40,7 +43,7 @@ export function History() {
   async function restore(r: AuditEntry) {
     try {
       const tx = await api.restoreTransaction(r.id);
-      toast(t("hist.restored", { n: tx.id }));
+      toast(t("hist.restored", { n: tx.num }));
       await notifySaved(tx);
       await reloadAll();
     } catch (e) {
@@ -92,7 +95,7 @@ export function History() {
                   <td>
                     <span className={`chip act-${r.action}`}>{t(`hist.act.${r.action}`)}</span>
                   </td>
-                  <td className="num muted">{r.entity === "transaction" ? r.entityId : ""}</td>
+                  <td className="num muted">{r.entity === "transaction" ? numOf(r) : ""}</td>
                   <td>
                     <div>{describe(r)}</div>
                     {diffTx(t, fmt, r.before, r.after).map((c) => (

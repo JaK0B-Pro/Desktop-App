@@ -313,7 +313,8 @@ export function TransactionForm({ initial, onClose }: { initial: Partial<TxInput
       ));
 
   const title =
-    (isEdit ? t("form.edit", { kind: kindLabel(t, kind).toLowerCase() }) : t("form.new")) + (isEdit ? ` — N° ${initial.id}` : "");
+    (isEdit ? t("form.edit", { kind: kindLabel(t, kind).toLowerCase() }) : t("form.new")) +
+    (isEdit && initial.num ? ` — N° ${initial.num}` : "");
 
   return (
     <Modal title={title} onClose={onClose} wide>

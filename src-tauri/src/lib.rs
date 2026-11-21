@@ -1,4 +1,5 @@
 mod admin;
+mod excel;
 mod ledger;
 mod models;
 mod suggest;
@@ -9,6 +10,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use ledger::Res;
 use models::*;
@@ -54,25 +56,27 @@ fn stamp() -> String {
     chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
 
-/// Daily automatic backup into `<app data>/backups`, keeping the 30 most recent copies.
+/// Daily automatic backup into `<app data>/backups`, keeping the 30 most recent daily copies.
+/// Safety copies taken before an upgrade or an update (`pre-…`) are never removed.
 fn auto_backup(conn: &Connection, dir: &Path) -> Res<()> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "db"))
-        .collect();
-    files.sort();
-    let today = chrono::Local::now().format("%Y%m%d").to_string();
-    if !files.iter().any(|p| p.to_string_lossy().contains(&format!("auto-{today}"))) {
-        ledger::backup_to(conn, &dir.join(format!("auto-{}.db", stamp())))?;
-        files = std::fs::read_dir(dir)
+    let daily = || -> Res<Vec<PathBuf>> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
             .map_err(|e| e.to_string())?
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x == "db"))
+            .filter(|p| {
+                p.extension().is_some_and(|x| x == "db")
+                    && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("auto-"))
+            })
             .collect();
         files.sort();
+        Ok(files)
+    };
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+    if !daily()?.iter().any(|p| p.to_string_lossy().contains(&format!("auto-{today}"))) {
+        ledger::backup_to(conn, &dir.join(format!("auto-{}.db", stamp())))?;
     }
+    let mut files = daily()?;
     while files.len() > 30 {
         let _ = std::fs::remove_file(files.remove(0));
     }
@@ -336,6 +340,83 @@ fn export_csv(app: AppHandle, state: State<AppState>) -> Res<String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
+// --- Excel exports -------------------------------------------------------------
+
+/// Builds an .xlsx in Documents/AccountBook/Excel, opens it (Excel or the default spreadsheet app)
+/// and returns its path.
+fn excel_export(
+    app: &AppHandle,
+    state: &State<AppState>,
+    name: &[&str],
+    build: impl FnOnce(&Connection, &Path) -> Res<()>,
+) -> Res<String> {
+    let dir = output_dir(app)?.join("Excel");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(excel::file_name(name));
+    authed(state, "viewer", |c, _| build(c, &path))
+        .map_err(|e| if e.contains("os error 32") || e.contains("Permission denied") { "ERR:file_open".to_string() } else { e })?;
+    // Opening is a convenience: the file is saved even if no spreadsheet app is installed.
+    let _ = app.opener().open_path(path.to_string_lossy(), None::<&str>);
+    Ok(path.to_string_lossy().into_owned())
+}
+
+fn period_label(from: &str, to: &str) -> String {
+    if from.get(..4) == to.get(..4) && from.ends_with("-01-01") && to.ends_with("-12-31") {
+        from[..4].to_string()
+    } else {
+        format!("{from} au {to}")
+    }
+}
+
+#[tauri::command(async)]
+fn export_account_xlsx(app: AppHandle, state: State<AppState>, id: i64, from: String, to: String) -> Res<String> {
+    let name = authed(&state, "viewer", |c, _| ledger::get_account(c, id))?.name;
+    excel_export(&app, &state, &["Relevé compte", &name, &period_label(&from, &to)], |c, p| {
+        excel::account_statement(c, id, &from, &to, p)
+    })
+}
+
+#[tauri::command(async)]
+fn export_party_xlsx(app: AppHandle, state: State<AppState>, id: i64, from: String, to: String) -> Res<String> {
+    let name = authed(&state, "viewer", |c, _| ledger::get_party(c, id))?.name;
+    excel_export(&app, &state, &["Relevé", &name, &period_label(&from, &to)], |c, p| {
+        excel::party_statement(c, id, &from, &to, p)
+    })
+}
+
+#[tauri::command(async)]
+fn export_chantier_xlsx(app: AppHandle, state: State<AppState>, id: i64, from: String, to: String) -> Res<String> {
+    let name = authed(&state, "viewer", |c, _| ledger::get_chantier(c, id))?.name;
+    excel_export(&app, &state, &["Chantier", &name, &period_label(&from, &to)], |c, p| {
+        excel::chantier_statement(c, id, &from, &to, p)
+    })
+}
+
+#[tauri::command(async)]
+fn export_etat_xlsx(app: AppHandle, state: State<AppState>, from: String, to: String) -> Res<String> {
+    excel_export(&app, &state, &["Etat des comptes", &period_label(&from, &to)], |c, p| excel::etat(c, &from, &to, p))
+}
+
+/// The entries shown in a window (after its filters), one sheet per type.
+#[tauri::command(async)]
+fn export_entries_xlsx(app: AppHandle, state: State<AppState>, title: String, ids: Vec<i64>, from: String, to: String) -> Res<String> {
+    excel_export(&app, &state, &[&title, &period_label(&from, &to)], |c, p| {
+        let txs = excel::load_entries(c, &ids)?;
+        excel::entries(c, txs, &title, &from, &to, p)
+    })
+}
+
+/// Every entry of the period, one sheet per type (Dépenses, Versements, Virements, Achats et Ventes à crédit).
+#[tauri::command(async)]
+fn export_all_xlsx(app: AppHandle, state: State<AppState>, from: String, to: String) -> Res<String> {
+    excel_export(&app, &state, &["Opérations", &period_label(&from, &to)], |c, p| {
+        let filter = TxFilter { from: Some(from.clone()), to: Some(to.clone()), ..Default::default() };
+        let txs = ledger::list_transactions(c, &filter)?;
+        let title = if ledger::get_setting(c, "language")?.as_deref() == Some("en") { "Entries" } else { "Opérations" };
+        excel::entries(c, txs, title, &from, &to, p)
+    })
+}
+
 #[tauri::command(async)]
 fn backup_database(app: AppHandle, state: State<AppState>) -> Res<String> {
     let path = output_dir(&app)?.join(format!("accountbook-backup-{}.db", stamp()));
@@ -359,10 +440,21 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            let conn = ledger::open(&dir.join("accountbook.db"))?;
+            let db_path = dir.join("accountbook.db");
+            // Before a new version upgrades the database, keep an exact copy of the old one.
+            let old_version = if db_path.exists() { ledger::file_schema_version(&db_path) } else { 0 };
+            if db_path.exists() && old_version < ledger::schema_version() {
+                let backups = dir.join("backups");
+                std::fs::create_dir_all(&backups)?;
+                let copy = backups.join(format!("pre-upgrade-v{old_version}-{}.db", stamp()));
+                let old = Connection::open(&db_path)?;
+                ledger::backup_to(&old, &copy).map_err(|e| format!("Backup before database upgrade failed: {e}"))?;
+            }
+            let conn = ledger::open(&db_path)?;
             // Startup health check and daily safety copy.
             let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0)).unwrap_or_else(|e| e.to_string());
             let db_warning = (check != "ok").then_some(check);
@@ -418,6 +510,12 @@ pub fn run() {
             export_csv,
             backup_database,
             backup_before_update,
+            export_account_xlsx,
+            export_party_xlsx,
+            export_chantier_xlsx,
+            export_etat_xlsx,
+            export_entries_xlsx,
+            export_all_xlsx,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AccountBook");

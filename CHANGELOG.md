@@ -5,7 +5,23 @@ Every delivery is a numbered version. Each version has Windows installers on the
 before going further.
 Installing a newer version keeps your data: the database is upgraded automatically.
 
+## 0.6.0 — Separate numbering, Excel exports
+
+- **Each type has its own numbering**, restarting at 1 in each exercice: Dépenses N° 1, 2, 3…, Versements N° 1, 2, 3…, Virements, Achats à crédit and Ventes à crédit each with their own N°. Existing entries are numbered automatically by date.
+- **Your data is safe during the upgrade**: before the database changes, an exact copy is saved in the *backups* folder (`pre-upgrade-…`). Safety copies are never deleted by the daily cleanup.
+- **📗 Excel export (.xlsx)** with a clean layout (enterprise header, period, coloured header row, real dates, amounts in DA with negatives in red, totals, filters, print-ready):
+  - every **compte** (on its card and its page): statement with solde initial, entrées, sorties and running solde
+  - every **bénéficiaire**: what they owe you / what you owe, running balance and situation
+  - every **chantier**: received, spent, credit operations and result
+  - the **État des comptes** (comptes and bénéficiaires sheets)
+  - each window (Dépenses, Versements, Virements, Crédits): exactly the lines shown, after your filters
+  - *Fichier → Exporter vers Excel*: the whole exercice, one sheet per type
+- Files are saved in *Documents\AccountBook\Excel* and open directly in Excel.
+- Wider date column in the lists.
+
 ## 0.5.0 — Menu bar, automatic updates, dark mode
+
+Commit `4a57beb`.
 
 - **Menu bar** at the top: Fichier · Opérations · Tiers · États · Outils · Aide. Every screen and action is there.
 - The **side panel is closed** by default (☰ opens it), so the windows use the full width.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ExcelButton } from "../components/ExcelButton";
 import { api } from "../api";
 import { useApp } from "../context";
 import { Empty, Field, Modal } from "../components/Modal";
@@ -103,7 +104,7 @@ function ChantierDetail({
   editing: ChantierInput | null;
   setEditing: (v: ChantierInput | null) => void;
 }) {
-  const { version, fail, fmt, navigate, openTx, t } = useApp();
+  const { version, fail, fmt, navigate, openTx, t, range } = useApp();
   const [rows, setRows] = useState<Transaction[]>([]);
 
   useEffect(() => {
@@ -127,6 +128,7 @@ function ChantierDetail({
           </p>
         </div>
         <div className="row">
+          <ExcelButton run={() => api.exportChantierXlsx(chantier.id, range.from, range.to)} />
           <button className="btn ghost" onClick={() => setEditing(chantier)}>
             {t("c.edit")}
           </button>

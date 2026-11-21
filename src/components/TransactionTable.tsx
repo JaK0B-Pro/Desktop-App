@@ -9,6 +9,7 @@ import { Empty } from "./Modal";
 export function toInput(t: Transaction): TxInput {
   const common = {
     id: t.id,
+    num: t.num,
     date: t.date,
     kind: t.kind,
     label: t.label,
@@ -110,9 +111,9 @@ export function TxGrid({
     const val = (r: Transaction): string | number => {
       switch (sort.key) {
         case "num":
-          return r.id;
+          return r.num;
         case "date":
-          return r.date + String(r.id).padStart(10, "0");
+          return r.date + String(r.num).padStart(10, "0");
         case "account":
           return r.lines
             .map((l) => l.accountName)
@@ -172,7 +173,7 @@ export function TxGrid({
 
   async function remove(row: Transaction) {
     if (!canEdit || isClosed(row.date)) return;
-    if (!(await confirm(t("c.confirmDelete", { name: `${row.id} · ${row.label} (${fmt(row.amount)})` })))) return;
+    if (!(await confirm(t("c.confirmDelete", { name: `N° ${row.num} · ${row.label} (${fmt(row.amount)})` })))) return;
     try {
       await api.deleteTransaction(row.id);
       toast(t("c.deleted"));
@@ -286,7 +287,7 @@ export function TxGrid({
                   >
                     {locked ? "🔒" : r.status === "pending" ? "⏳" : r.chequeNo ? "🧾" : ""}
                   </td>
-                  {show("num") && <td className="num muted">{r.id}</td>}
+                  {show("num") && <td className="num muted">{r.num}</td>}
                   {show("date") && <td className="clip">{r.date.split("-").reverse().join("/")}</td>}
                   {showType && (
                     <td className="clip">

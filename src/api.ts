@@ -80,6 +80,13 @@ export const api = {
   getDashboard: () => invoke<Dashboard>("get_dashboard"),
   getReport: (from: string, to: string) => invoke<Report>("get_report", { from, to }),
   exportCsv: () => invoke<string>("export_csv"),
+  exportAccountXlsx: (id: number, from: string, to: string) => invoke<string>("export_account_xlsx", { id, from, to }),
+  exportPartyXlsx: (id: number, from: string, to: string) => invoke<string>("export_party_xlsx", { id, from, to }),
+  exportChantierXlsx: (id: number, from: string, to: string) => invoke<string>("export_chantier_xlsx", { id, from, to }),
+  exportEtatXlsx: (from: string, to: string) => invoke<string>("export_etat_xlsx", { from, to }),
+  exportEntriesXlsx: (title: string, ids: number[], from: string, to: string) =>
+    invoke<string>("export_entries_xlsx", { title, ids, from, to }),
+  exportAllXlsx: (from: string, to: string) => invoke<string>("export_all_xlsx", { from, to }),
   backupDatabase: () => invoke<string>("backup_database"),
   backupBeforeUpdate: () => invoke<string>("backup_before_update"),
 };

@@ -25,6 +25,7 @@ export function diffTx(t: T, fmt: (c: number) => string, a?: Transaction, b?: Tr
   };
   const d = (v: unknown) => (typeof v === "string" ? v.split("-").reverse().join("/") : "—");
   const accounts = (x: Transaction) => x.lines.map((l) => `${l.accountName} ${fmt(Math.abs(l.amount))}`).join(", ");
+  if (a.num && b.num) cmp(t("col.num"), a.num, b.num);
   cmp(t("col.date"), a.date, b.date, d);
   cmp(t("col.type"), t(`kind.${a.kind}`), t(`kind.${b.kind}`));
   cmp(t("col.label"), a.label, b.label);

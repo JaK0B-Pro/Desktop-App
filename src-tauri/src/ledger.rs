@@ -167,6 +167,15 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_lines_chantier_tx ON transaction_lines(chantier_id, transaction_id, amount);
     CREATE INDEX IF NOT EXISTS idx_lines_account_amount ON transaction_lines(account_id, amount);
     "#,
+    // v3: each type of entry has its own numbering (Dépenses 1, 2, 3…, Versements 1, 2, 3…),
+    // restarting at 1 in each fiscal year. Existing entries are numbered by date.
+    r#"
+    ALTER TABLE transactions ADD COLUMN num INTEGER;
+    UPDATE transactions SET num = r.n FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY kind, substr(date, 1, 4) ORDER BY date, id) AS n FROM transactions
+    ) AS r WHERE transactions.id = r.id;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_num ON transactions(kind, substr(date, 1, 4), num);
+    "#,
 ];
 
 /// `label_context.kind` value used to count uses of a label per chantier (`party_id` holds the chantier id).
@@ -181,6 +190,18 @@ pub fn open(path: &Path) -> Res<Connection> {
     let conn = Connection::open(path).map_err(e)?;
     init(&conn)?;
     Ok(conn)
+}
+
+/// Database schema version of this build (number of migrations).
+pub fn schema_version() -> usize {
+    MIGRATIONS.len()
+}
+
+/// Database schema version of an existing file (0 for a new or unreadable file).
+pub fn file_schema_version(path: &Path) -> usize {
+    Connection::open(path)
+        .and_then(|c| c.query_row("PRAGMA user_version", [], |r| r.get(0)))
+        .unwrap_or(0)
 }
 
 pub fn init(conn: &Connection) -> Res<()> {
@@ -737,11 +758,33 @@ pub fn save_transaction(conn: &mut Connection, input: &TxInput) -> Res<Transacti
     save_transaction_by(conn, input, None)
 }
 
+/// Next number in the sequence of this type of entry for the fiscal year of `date`.
+fn next_num(conn: &Connection, kind: &str, date: &str) -> Res<i64> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(num), 0) + 1 FROM transactions WHERE kind = ?1 AND substr(date, 1, 4) = substr(?2, 1, 4)",
+        params![kind, date],
+        |r| r.get(0),
+    )
+    .map_err(e)
+}
+
+fn num_taken(conn: &Connection, kind: &str, date: &str, num: i64) -> Res<bool> {
+    conn.query_row(
+        "SELECT 1 FROM transactions WHERE kind = ?1 AND substr(date, 1, 4) = substr(?2, 1, 4) AND num = ?3",
+        params![kind, date, num],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|o| o.is_some())
+    .map_err(e)
+}
+
 /// How a save is applied: the normal create/update, or re-inserting a deleted entry with its old number.
 #[derive(Clone, Copy, PartialEq)]
 enum SaveMode {
     Normal,
-    Restore(i64),
+    /// Internal id and the per-type number it had (0 when unknown).
+    Restore(i64, i64),
 }
 
 /// Saves a transaction on behalf of `user`: refuses closed fiscal years, records the change history.
@@ -772,13 +815,19 @@ fn save_inner(conn: &mut Connection, input: &TxInput, user: Option<&User>, mode:
     admin::ensure_exercise(&tx, admin::year_of(&input.date))?;
     let mut previous_key = None;
     let id = match (mode, input.id) {
-        (SaveMode::Restore(id), _) => {
+        (SaveMode::Restore(id, old_num), _) => {
+            // Keep its old number when that number is still free in its sequence.
+            let num = if old_num > 0 && !num_taken(&tx, &input.kind, &input.date, old_num)? {
+                old_num
+            } else {
+                next_num(&tx, &input.kind, &input.date)?
+            };
             tx.execute(
                 "INSERT INTO transactions (id, date, kind, label, party_id, amount, notes, created_at, chantier_id, family, status, \
-                 cheque_no, cheque_crossed, cheque_payee) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                 cheque_no, cheque_crossed, cheque_payee, num) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
                 params![
                     id, input.date, input.kind, label, input.party_id, total, notes, now_str(), chantier_id,
-                    family, status, cheque_no, input.cheque_crossed as i64, cheque_payee
+                    family, status, cheque_no, input.cheque_crossed as i64, cheque_payee, num
                 ],
             )
             .map_err(|_| "ERR:number_taken".to_string())?;
@@ -790,13 +839,20 @@ fn save_inner(conn: &mut Connection, input: &TxInput, user: Option<&User>, mode:
                 .optional()
                 .map_err(e)?
                 .map(|l| suggest::normalize(&l));
+            // Same type and same year: keep the number. Otherwise it takes the next number of its new sequence.
+            let old = before.as_ref().expect("loaded above");
+            let num = if old.kind == input.kind && old.date.get(..4) == input.date.get(..4) && old.num > 0 {
+                old.num
+            } else {
+                next_num(&tx, &input.kind, &input.date)?
+            };
             let n = tx
                 .execute(
                     "UPDATE transactions SET date=?1, kind=?2, label=?3, party_id=?4, amount=?5, notes=?6, chantier_id=?7, \
-                     family=?8, status=?9, cheque_no=?10, cheque_crossed=?11, cheque_payee=?12 WHERE id=?13",
+                     family=?8, status=?9, cheque_no=?10, cheque_crossed=?11, cheque_payee=?12, num=?13 WHERE id=?14",
                     params![
                         input.date, input.kind, label, input.party_id, total, notes, chantier_id,
-                        family, status, cheque_no, input.cheque_crossed as i64, cheque_payee, id
+                        family, status, cheque_no, input.cheque_crossed as i64, cheque_payee, num, id
                     ],
                 )
                 .map_err(e)?;
@@ -807,12 +863,13 @@ fn save_inner(conn: &mut Connection, input: &TxInput, user: Option<&User>, mode:
             id
         }
         (SaveMode::Normal, None) => {
+            let num = next_num(&tx, &input.kind, &input.date)?;
             tx.execute(
                 "INSERT INTO transactions (date, kind, label, party_id, amount, notes, created_at, chantier_id, family, status, \
-                 cheque_no, cheque_crossed, cheque_payee) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                 cheque_no, cheque_crossed, cheque_payee, num) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
                 params![
                     input.date, input.kind, label, input.party_id, total, notes, now_str(), chantier_id,
-                    family, status, cheque_no, input.cheque_crossed as i64, cheque_payee
+                    family, status, cheque_no, input.cheque_crossed as i64, cheque_payee, num
                 ],
             )
             .map_err(e)?;
@@ -832,7 +889,7 @@ fn save_inner(conn: &mut Connection, input: &TxInput, user: Option<&User>, mode:
     }
     let after = get_transaction(&tx, id)?;
     let action = match (mode, &before) {
-        (SaveMode::Restore(_), _) => "restore",
+        (SaveMode::Restore(..), _) => "restore",
         (_, Some(_)) => "update",
         _ => "create",
     };
@@ -841,9 +898,9 @@ fn save_inner(conn: &mut Connection, input: &TxInput, user: Option<&User>, mode:
     Ok(after)
 }
 
-/// "N° 12 · 2026-09-29 · Ciment · 8288.00" — the one-line description stored in the history.
+/// "N° 12 · 2026-09-29 · Ciment · 828800" — the one-line description stored in the history.
 fn tx_summary(t: &Transaction) -> String {
-    format!("{} · {} · {}", t.date, t.label, t.amount)
+    format!("N° {} · {} · {} · {}", t.num, t.date, t.label, t.amount)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -882,7 +939,7 @@ pub fn restore_transaction(conn: &mut Connection, audit_id: i64, user: Option<&U
         lines,
         notes: snap.notes.clone(),
     };
-    save_inner(conn, &input, user, SaveMode::Restore(snap.id))
+    save_inner(conn, &input, user, SaveMode::Restore(snap.id, snap.num))
 }
 
 /// Maps a row of `TX_SELECT` (positional columns: faster than lookups by name on big lists).
@@ -904,6 +961,7 @@ fn row_to_tx(r: &Row) -> rusqlite::Result<Transaction> {
         cheque_payee: r.get(13)?,
         party_name: r.get(14)?,
         chantier_name: r.get(15)?,
+        num: r.get::<_, Option<i64>>(16)?.unwrap_or(0),
         lines: vec![],
         effect: None,
         running_balance: None,
@@ -945,7 +1003,7 @@ fn load_lines(conn: &Connection, txs: &mut [Transaction]) -> Res<()> {
 }
 
 const TX_SELECT: &str = "SELECT t.id, t.date, t.kind, t.label, t.party_id, t.amount, t.notes, t.created_at, t.chantier_id, \
-     t.family, t.status, t.cheque_no, t.cheque_crossed, t.cheque_payee, p.name AS party_name, c.name AS chantier_name FROM transactions t \
+     t.family, t.status, t.cheque_no, t.cheque_crossed, t.cheque_payee, p.name AS party_name, c.name AS chantier_name, t.num FROM transactions t \
      LEFT JOIN parties p ON p.id = t.party_id LEFT JOIN chantiers c ON c.id = t.chantier_id";
 
 pub fn get_transaction(conn: &Connection, id: i64) -> Res<Transaction> {
@@ -1006,7 +1064,7 @@ fn query_transactions(conn: &Connection, f: &TxFilter, ascending: bool) -> Res<V
         // Also matches the transaction number ("1257") and amounts typed in major units.
         sql.push_str(
             " AND (t.label LIKE ? OR t.notes LIKE ? OR p.name LIKE ? OR c.name LIKE ? OR t.family LIKE ? \
-             OR t.cheque_no LIKE ? OR t.cheque_payee LIKE ? OR CAST(t.id AS TEXT) = ? \
+             OR t.cheque_no LIKE ? OR t.cheque_payee LIKE ? OR CAST(t.num AS TEXT) = ? \
              OR t.id IN (SELECT l.transaction_id FROM transaction_lines l JOIN accounts a ON a.id = l.account_id \
                          LEFT JOIN chantiers lc ON lc.id = l.chantier_id WHERE a.name LIKE ? OR lc.name LIKE ?))",
         );
@@ -1857,6 +1915,165 @@ mod chantier_tests {
         assert_eq!(increment_number("0099").as_deref(), Some("0100"));
         assert_eq!(increment_number("CH-99").as_deref(), Some("CH-100"));
         assert_eq!(increment_number("abc"), None);
+    }
+}
+
+#[cfg(test)]
+mod numbering_tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        c
+    }
+
+    fn add(c: &mut Connection, kind: &str, date: &str) -> Transaction {
+        let cash = list_accounts(c, false).unwrap()[0].id;
+        let party = if kind == "purchase" || kind == "sale" {
+            Some(save_party(c, &PartyInput { name: format!("P{date}{kind}"), kind: "supplier".into(), ..Default::default() }).unwrap().id)
+        } else {
+            None
+        };
+        let lines = if party.is_some() { vec![] } else { vec![LineInput { account_id: cash, amount: 100, chantier_id: None }] };
+        let bank = if kind == "transfer" {
+            Some(save_account(c, &AccountInput { name: format!("B{date}"), kind: "bank".into(), ..Default::default() }).unwrap().id)
+        } else {
+            None
+        };
+        save_transaction(
+            c,
+            &TxInput {
+                date: date.into(),
+                kind: kind.into(),
+                label: "x".into(),
+                party_id: party,
+                amount: Some(100),
+                from_account_id: bank.map(|_| cash),
+                lines: match bank {
+                    Some(b) => vec![LineInput { account_id: b, amount: 100, chantier_id: None }],
+                    None => lines,
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn each_type_has_its_own_numbers_per_year() {
+        let mut c = db();
+        let e1 = add(&mut c, "expense", "2026-01-05");
+        let i1 = add(&mut c, "income", "2026-01-06");
+        let e2 = add(&mut c, "expense", "2026-01-07");
+        let t1 = add(&mut c, "transfer", "2026-01-08");
+        let p1 = add(&mut c, "purchase", "2026-01-09");
+        let s1 = add(&mut c, "sale", "2026-01-10");
+        let i2 = add(&mut c, "income", "2026-02-01");
+        assert_eq!([e1.num, e2.num], [1, 2]);
+        assert_eq!([i1.num, i2.num], [1, 2]);
+        assert_eq!([t1.num, p1.num, s1.num], [1, 1, 1]);
+        // A new fiscal year starts again at 1.
+        assert_eq!(add(&mut c, "expense", "2027-01-01").num, 1);
+        assert_eq!(add(&mut c, "expense", "2026-12-31").num, 3);
+        // Search by number finds the entry of that number in every type.
+        let found = list_transactions(&c, &TxFilter { search: Some("2".into()), kind: Some("income".into()), ..Default::default() }).unwrap();
+        assert_eq!(found.iter().map(|t| t.num).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn editing_keeps_or_moves_the_number() {
+        let mut c = db();
+        let e1 = add(&mut c, "expense", "2026-03-01");
+        add(&mut c, "income", "2026-03-01");
+        let mut input = tests_support::to_input(&e1);
+        input.label = "changed".into();
+        assert_eq!(save_transaction(&mut c, &input).unwrap().num, 1, "same type and year: same number");
+        input.kind = "income".into();
+        assert_eq!(save_transaction(&mut c, &input).unwrap().num, 2, "becomes the next deposit");
+        input.date = "2027-01-01".into();
+        assert_eq!(save_transaction(&mut c, &input).unwrap().num, 1, "first deposit of 2027");
+    }
+
+    #[test]
+    fn restore_keeps_its_number_when_free() {
+        let mut c = db();
+        add(&mut c, "expense", "2026-01-01");
+        let e2 = add(&mut c, "expense", "2026-01-02");
+        add(&mut c, "expense", "2026-01-03");
+        delete_transaction(&mut c, e2.id).unwrap();
+        let log = admin::list_audit(&c, &AuditFilter { entity_id: Some(e2.id), ..Default::default() }).unwrap();
+        let back = restore_transaction(&mut c, log[0].id, None).unwrap();
+        assert_eq!((back.id, back.num), (e2.id, 2));
+    }
+
+    #[test]
+    fn upgrade_numbers_existing_entries_by_date() {
+        // A database from before separate numbering (schema v2) with mixed types and years.
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        for (i, sql) in MIGRATIONS.iter().take(2).enumerate() {
+            c.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1)).unwrap();
+        }
+        for (date, kind) in [
+            ("2026-02-01", "expense"),
+            ("2026-01-15", "income"),
+            ("2026-01-10", "expense"),
+            ("2025-12-31", "expense"),
+            ("2026-03-01", "income"),
+        ] {
+            c.execute(
+                "INSERT INTO transactions (date, kind, label, amount, created_at) VALUES (?1, ?2, 'x', 1, '')",
+                params![date, kind],
+            )
+            .unwrap();
+        }
+        init(&c).unwrap();
+        let mut got: Vec<(String, String, i64)> = list_transactions(&c, &TxFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.date, t.kind, t.num))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                ("2025-12-31".into(), "expense".into(), 1),
+                ("2026-01-10".into(), "expense".into(), 1),
+                ("2026-01-15".into(), "income".into(), 1),
+                ("2026-02-01".into(), "expense".into(), 2),
+                ("2026-03-01".into(), "income".into(), 2),
+            ]
+        );
+        assert_eq!(file_version(&c), schema_version());
+    }
+
+    /// Time to number 45,000 existing entries: `cargo test --release --lib upgrade_speed -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn upgrade_speed() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(SCHEMA).unwrap();
+        for (i, sql) in MIGRATIONS.iter().take(2).enumerate() {
+            c.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1)).unwrap();
+        }
+        c.execute_batch("BEGIN").unwrap();
+        for i in 0..45_000 {
+            let kind = ["expense", "income", "transfer", "purchase", "sale"][i % 5];
+            let date = format!("{}-{:02}-{:02}", 2024 + i / 15_000, 1 + (i / 1300) % 12, 1 + i % 28);
+            c.execute("INSERT INTO transactions (date, kind, label, amount, created_at) VALUES (?1, ?2, 'x', 1, '')", params![date, kind])
+                .unwrap();
+        }
+        c.execute_batch("COMMIT").unwrap();
+        let t = std::time::Instant::now();
+        init(&c).unwrap();
+        println!("numbered 45,000 entries in {:?}", t.elapsed());
+        let max: i64 = c.query_row("SELECT MAX(num) FROM transactions", [], |r| r.get(0)).unwrap();
+        assert_eq!(max, 3_000);
+    }
+
+    fn file_version(c: &Connection) -> usize {
+        c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap()
     }
 }
 

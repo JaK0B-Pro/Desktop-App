@@ -78,7 +78,7 @@ export function printVoucher(c: PrintCtx, tx: Transaction) {
   printHtml(`
     <div class="p-doc">
       ${companyHeader(c)}
-      <h1 class="p-title">${t(`print.voucher.${tx.kind}`)} N° ${tx.id}</h1>
+      <h1 class="p-title">${t(`print.voucher.${tx.kind}`)} N° ${tx.num}</h1>
       <table class="p-fields">${rows
         .filter(([, v]) => v)
         .map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`)
@@ -132,7 +132,7 @@ export function printList(
   const body = rows
     .map(
       (r) => `<tr>
-        <td class="num">${r.id}</td><td>${frDate(r.date)}</td>
+        <td class="num">${r.num}</td><td>${frDate(r.date)}</td>
         <td>${esc(r.lines.map((l) => l.accountName).join(", ") || t("journal.onCredit"))}</td>
         <td>${esc([...new Set([r.chantierName, ...r.lines.map((l) => l.chantierName)].filter(Boolean))].join(", "))}</td>
         <td>${esc(r.partyName)}</td><td>${esc(r.label)}</td>

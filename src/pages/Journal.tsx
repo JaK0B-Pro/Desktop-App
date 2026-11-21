@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ExcelButton } from "../components/ExcelButton";
 import { api } from "../api";
 import { useApp, type JournalKind, type TxChange } from "../context";
 import { FilterButton, RangeFilter, ValueFilter, type FilterOption } from "../components/ColumnFilter";
@@ -129,7 +130,7 @@ export function Journal({ kind }: { kind: JournalKind }) {
       m.set(
         r.id,
         [
-          r.id,
+          r.num,
           r.date.split("-").reverse().join("/"),
           r.label,
           r.partyName,
@@ -170,7 +171,7 @@ export function Journal({ kind }: { kind: JournalKind }) {
         }
         if (skip !== "num") {
           const [lo, hi] = filters.num;
-          if ((lo != null && r.id < lo) || (hi != null && r.id > hi)) return false;
+          if ((lo != null && r.num < lo) || (hi != null && r.num > hi)) return false;
         }
         return true;
       });
@@ -322,7 +323,7 @@ export function Journal({ kind }: { kind: JournalKind }) {
 
   async function remove() {
     if (!current) return fail(t("journal.selectFirst"));
-    if (!(await confirm(t("c.confirmDelete", { name: `${current.id} · ${current.label} (${fmt(current.amount)})` })))) return;
+    if (!(await confirm(t("c.confirmDelete", { name: `N° ${current.num} · ${current.label} (${fmt(current.amount)})` })))) return;
     try {
       await api.deleteTransaction(current.id);
       toast(t("c.deleted"));
@@ -357,9 +358,21 @@ export function Journal({ kind }: { kind: JournalKind }) {
           <button className="btn" onClick={() => printList(pctx, title, from, to, shown, amountOf)}>
             🖨 {t("c.print")}
           </button>
+          <ExcelButton
+            run={() =>
+              shown.length
+                ? api.exportEntriesXlsx(
+                    title,
+                    shown.map((r) => r.id),
+                    from,
+                    to,
+                  )
+                : Promise.reject("ERR:nothing_to_export")
+            }
+          />
           {current && (
             <button className="btn ghost" onClick={() => printVoucher(pctx, current)} title={t("form.printVoucher")}>
-              🧾 N° {current.id}
+              🧾 N° {current.num}
             </button>
           )}
           <span className="toolbar-sep" />

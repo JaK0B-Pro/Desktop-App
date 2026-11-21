@@ -2028,7 +2028,7 @@ fieldset.plain {
   width: 66px;
 }
 .table.grid.fixed .col-date {
-  width: 92px;
+  width: 104px;
 }
 .table.grid.fixed .col-type {
   width: 108px;
@@ -2345,4 +2345,27 @@ fieldset.plain {
   justify-content: center;
   align-items: center;
   gap: 12px;
+}
+
+/* ---- Excel buttons ---- */
+.btn.excel {
+  color: #1d6f42;
+  border-color: color-mix(in srgb, #1d6f42 35%, var(--border));
+}
+.btn.excel:hover:not(:disabled) {
+  background: color-mix(in srgb, #1d6f42 10%, var(--surface));
+}
+:root[data-theme="dark"] .btn.excel {
+  color: #4ade80;
+}
+.account-card {
+  cursor: pointer;
+}
+.account-card:focus-visible {
+  outline: 2px solid var(--primary);
+}
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }

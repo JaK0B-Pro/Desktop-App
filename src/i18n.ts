@@ -313,7 +313,7 @@ const fr = {
   "set.forgetConfirm": "Oublier « {label} » ? Il ne sera plus suggéré (vos opérations sont conservées).",
   "set.data": "Données",
   "set.dataHint": "Les fichiers sont enregistrés dans Documents/AccountBook.",
-  "set.export": "Exporter vers Excel (CSV)",
+  "set.export": "Exporter vers Excel",
   "set.backup": "Sauvegarder la base",
   "set.exported": "Exporté vers {p}",
   "set.backedUp": "Sauvegarde enregistrée : {p}",
@@ -481,6 +481,12 @@ const fr = {
   "set.companyPhone": "Téléphone",
   "set.companyEmail": "E-mail",
   "set.companyId": "NIF / RC",
+  "xl.button": "Excel",
+  "xl.title": "Exporter vers Excel (.xlsx)",
+  "xl.done": "Fichier Excel enregistré : {p}",
+  "xl.working": "Création du fichier Excel…",
+  "err.file_open": "Ce fichier est déjà ouvert dans Excel : fermez-le puis réessayez",
+  "err.nothing_to_export": "Rien à exporter sur cette période",
 } as const;
 
 export type TKey = keyof typeof fr;
@@ -781,7 +787,7 @@ const en: Record<TKey, string> = {
   "set.forgetConfirm": "Forget “{label}”? It will not be suggested anymore (your entries are kept).",
   "set.data": "Data",
   "set.dataHint": "Files are saved in your Documents/AccountBook folder.",
-  "set.export": "Export to Excel (CSV)",
+  "set.export": "Export to Excel",
   "set.backup": "Back up database",
   "set.exported": "Exported to {p}",
   "set.backedUp": "Backup saved to {p}",
@@ -947,6 +953,12 @@ const en: Record<TKey, string> = {
   "set.companyPhone": "Phone",
   "set.companyEmail": "Email",
   "set.companyId": "Tax / registration no.",
+  "xl.button": "Excel",
+  "xl.title": "Export to Excel (.xlsx)",
+  "xl.done": "Excel file saved: {p}",
+  "xl.working": "Creating the Excel file…",
+  "err.file_open": "This file is already open in Excel: close it and try again",
+  "err.nothing_to_export": "Nothing to export in this period",
 };
 
 export type Lang = "fr" | "en";

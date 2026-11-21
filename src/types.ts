@@ -86,6 +86,8 @@ export interface LineInput {
 
 export interface TxInput {
   id?: number | null;
+  /** N° of an existing entry (display only; the backend assigns numbers). */
+  num?: number | null;
   date: string;
   kind: TxKind;
   label: string;
@@ -112,7 +114,10 @@ export interface LineView {
 
 /** Optional fields are omitted from the JSON when empty (keeps large years light). */
 export interface Transaction {
+  /** Internal identifier (never shown). */
   id: number;
+  /** N° shown to the user: its own sequence per type of entry and per fiscal year. */
+  num: number;
   date: string;
   kind: TxKind;
   label: string;

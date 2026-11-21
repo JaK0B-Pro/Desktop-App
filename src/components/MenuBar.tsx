@@ -45,6 +45,7 @@ export function MenuBar({ sidebar, toggleSidebar }: { sidebar: boolean; toggleSi
     toast,
     route,
     setExercise,
+    range,
   } = app;
   const [open, setOpen] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"password" | "exercise" | "about" | null>(null);
@@ -99,7 +100,14 @@ export function MenuBar({ sidebar, toggleSidebar }: { sidebar: boolean; toggleSi
       items: [
         { label: "menu.newEntry", icon: "＋", shortcut: "Ctrl+N", onClick: () => openTx(), hidden: !canEdit, disabled: locked },
         "sep",
-        { label: "set.export", icon: "⤓", onClick: run(api.exportCsv, (p) => t("set.exported", { p })) },
+        {
+          label: "set.export",
+          icon: "📗",
+          onClick: run(
+            () => api.exportAllXlsx(range.from, range.to),
+            (p) => t("xl.done", { p }),
+          ),
+        },
         { label: "set.backup", icon: "💾", onClick: run(api.backupDatabase, (p) => t("set.backedUp", { p })), hidden: !canEdit },
         "sep",
         { label: "auth.changePassword", icon: "🔑", onClick: () => setDialog("password") },

@@ -165,7 +165,12 @@ pub struct LineView {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
+    /// Internal identifier (never shown).
     pub id: i64,
+    /// Number shown to the user: its own sequence per type of entry and per fiscal year
+    /// (Dépenses 1, 2, 3…, Versements 1, 2, 3…). 0 in history snapshots taken before numbering existed.
+    #[serde(default)]
+    pub num: i64,
     pub date: String,
     pub kind: String,
     pub label: String,

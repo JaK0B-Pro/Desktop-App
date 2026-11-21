@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ExcelButton } from "../components/ExcelButton";
 import { api } from "../api";
 import { useApp } from "../context";
 import { AmountInput } from "../components/AmountInput";
@@ -146,7 +147,7 @@ function PartyDetail({
   editing: PartyInput | null;
   setEditing: (v: PartyInput | null) => void;
 }) {
-  const { version, fail, fmt, navigate, openTx, accounts, t } = useApp();
+  const { version, fail, fmt, navigate, openTx, accounts, t, range } = useApp();
   const balanceText = useBalanceText();
   const cashbox = accounts.find((a) => !a.archived);
   const [rows, setRows] = useState<Transaction[]>([]);
@@ -175,9 +176,12 @@ function PartyDetail({
             {party.notes && ` · ${party.notes}`}
           </p>
         </div>
-        <button className="btn ghost" onClick={() => setEditing(party)}>
-          {t("c.edit")}
-        </button>
+        <div className="row">
+          <ExcelButton run={() => api.exportPartyXlsx(party.id, range.from, range.to)} />
+          <button className="btn ghost" onClick={() => setEditing(party)}>
+            {t("c.edit")}
+          </button>
+        </div>
       </header>
 
       <section className={`balance-banner ${party.balance > 0 ? "pos" : party.balance < 0 ? "neg" : ""}`}>

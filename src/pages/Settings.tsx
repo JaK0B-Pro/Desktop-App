@@ -10,7 +10,7 @@ import { today } from "../money";
 import type { Suggestion } from "../types";
 
 export function Settings() {
-  const { settings, updateSetting, fmt, toast, fail, confirm, version, refresh, t, lang, money, isAdmin, canEdit, user } =
+  const { settings, updateSetting, fmt, toast, fail, confirm, version, refresh, t, lang, money, isAdmin, canEdit, user, range } =
     useApp();
   const [pwd, setPwd] = useState(false);
   const [labels, setLabels] = useState<Suggestion[]>([]);
@@ -230,7 +230,15 @@ export function Settings() {
         <h3>{t("set.data")}</h3>
         <p className="muted small">{t("set.dataHint")}</p>
         <div className="row">
-          <button className="btn" onClick={() => run(api.exportCsv, (p) => t("set.exported", { p }))}>
+          <button
+            className="btn"
+            onClick={() =>
+              run(
+                () => api.exportAllXlsx(range.from, range.to),
+                (p) => t("xl.done", { p }),
+              )
+            }
+          >
             {t("set.export")}
           </button>
           <button className="btn" disabled={!canEdit} onClick={() => run(api.backupDatabase, (p) => t("set.backedUp", { p }))}>

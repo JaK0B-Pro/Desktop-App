@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ExcelButton } from "../components/ExcelButton";
 import { api } from "../api";
 import { useApp } from "../context";
 import { AmountInput } from "../components/AmountInput";
@@ -8,7 +9,7 @@ import { TxGrid } from "../components/TransactionTable";
 import type { Account, AccountInput, AccountKind, Transaction } from "../types";
 
 export function Accounts() {
-  const { accounts, route, navigate, fmt, openTx, t } = useApp();
+  const { accounts, route, navigate, fmt, openTx, t, range } = useApp();
   const [editing, setEditing] = useState<AccountInput | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const list = accounts.filter((a) => showArchived || !a.archived);
@@ -54,11 +55,14 @@ export function Accounts() {
       ) : (
         <div className="cards">
           {list.map((a) => (
-            <button
+            <div
               key={a.id}
+              role="button"
+              tabIndex={0}
               className={`account-card ${a.archived ? "archived" : ""}`}
               style={{ borderTopColor: a.color ?? undefined }}
               onClick={() => navigate({ page: "accounts", accountId: a.id })}
+              onKeyDown={(e) => e.key === "Enter" && navigate({ page: "accounts", accountId: a.id })}
             >
               <small className="muted">
                 {accountKindLabel(t, a.kind)}
@@ -66,7 +70,10 @@ export function Accounts() {
               </small>
               <h3>{a.name}</h3>
               <strong className={`big ${a.balance < 0 ? "neg" : ""}`}>{fmt(a.balance)}</strong>
-            </button>
+              <div className="card-actions">
+                <ExcelButton small run={() => api.exportAccountXlsx(a.id, range.from, range.to)} />
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -86,7 +93,7 @@ function AccountDetail({
   editing: AccountInput | null;
   setEditing: (v: AccountInput | null) => void;
 }) {
-  const { version, fail, fmt, navigate, openTx, t } = useApp();
+  const { version, fail, fmt, navigate, openTx, t, range } = useApp();
   const [rows, setRows] = useState<Transaction[]>([]);
 
   useEffect(() => {
@@ -115,6 +122,7 @@ function AccountDetail({
           </p>
         </div>
         <div className="row">
+          <ExcelButton run={() => api.exportAccountXlsx(account.id, range.from, range.to)} />
           <button className="btn ghost" onClick={onEdit}>
             {t("c.edit")}
           </button>

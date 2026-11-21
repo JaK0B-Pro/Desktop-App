@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ExcelButton } from "../components/ExcelButton";
 import { api } from "../api";
 import { useApp } from "../context";
 import { accountKindLabel, partyKindLabel } from "../components/labels";
@@ -71,9 +72,12 @@ export function Etat() {
           <h1>⚖ {t("etat.title")}</h1>
           <p className="muted">{t("etat.subtitle", { year: exercise })}</p>
         </div>
-        <button className="btn" onClick={print} disabled={!rows?.length}>
-          🖨 {t("c.print")}
-        </button>
+        <div className="row">
+          <ExcelButton run={() => api.exportEtatXlsx(from, to)} />
+          <button className="btn" onClick={print} disabled={!rows?.length}>
+            🖨 {t("c.print")}
+          </button>
+        </div>
       </header>
       <div className="filters">
         <div className="segmented">
